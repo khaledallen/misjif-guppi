@@ -1,8 +1,11 @@
 node_modules/
 functions/lib/
 *.log
-.env
 .env.*
+# functions/.env holds non-secret deploy params (model name etc.) and IS committed.
+# Secrets go in Secret Manager, never in .env files.
+.env
+!functions/.env
 *.local
 .firebase/
 .runtimeconfig.json
