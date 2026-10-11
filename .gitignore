@@ -1,0 +1,11 @@
+node_modules/
+functions/lib/
+*.log
+.env
+.env.*
+*.local
+.firebase/
+.runtimeconfig.json
+# never commit OAuth client files or tokens
+client_secret*.json
+token*.json
