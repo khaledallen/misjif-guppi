@@ -14,19 +14,23 @@ import {
   isAffirmative,
   isStandingInstruction,
   lineDiff,
+  planHistory,
+  replayHistory,
   shouldStartNewSession,
-  trimHistory,
+  type HistoryWindow,
   type StoredMessage,
 } from "./chatlogic";
 
 // ---------------------------------------------------------------------------
 // Firestore layout
 //   state/chat                      { currentId }
-//   conversations/{id}              { createdAt, lastActiveAt, turns, channel, pending? }
+//   conversations/{id}              { createdAt, lastActiveAt, turns, channel, pending?,
+//                                     system?, context?, historyStart?, thinkingFrom? }
 //   conversations/{id}/messages/{n} { seq, role, content (JSON), createdAt }
 // ---------------------------------------------------------------------------
 
 const MAX_TOOL_ROUNDS = 8;
+const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
 
 interface PendingProposal {
   id: string;
@@ -44,6 +48,10 @@ interface ConversationDoc {
   turns: number;
   channel: string;
   pending?: PendingProposal | null;
+  system?: string; // frozen at the first turn: thinking blocks are bound to it
+  context?: string; // date + briefing last sent to the model
+  historyStart?: number; // see HistoryWindow
+  thinkingFrom?: number;
 }
 
 export type SessionMode = "auto" | "new" | "continue";
@@ -127,7 +135,9 @@ async function saveMessages(convId: string, startSeq: number, msgs: StoredMessag
 // ---------------------------------------------------------------------------
 // System prompt
 // ---------------------------------------------------------------------------
-function systemPrompt(briefing: string, memoryDigest: string, isNewSession: boolean): string {
+// Frozen for the whole session: changing the system prompt mid-session invalidates
+// every earlier thinking block. Anything that changes goes in sessionContext().
+function systemPrompt(memoryDigest: string): string {
   return `You are GUPPI, Khaled's email and priorities assistant (named for the Bobiverse subsystem).
 
 Voice:
@@ -161,7 +171,14 @@ Memory:
 - Long-term memory is not built yet (issue #8). If asked to remember or pin something, call remember; it will report
   that nothing was saved, and you tell Khaled plainly.
 ${memoryDigest ? `\nActive memories:\n${memoryDigest}\n` : ""}
-Today: ${new Date().toISOString().slice(0, 10)}. ${isNewSession ? "This is the start of a new session." : ""}
+Context:
+- Today's date and the current briefing arrive as system messages in the conversation: at the start of a session and
+  again whenever they change. The latest one is current.`;
+}
+
+/** Date and briefing; sent as an appended system message whenever it changes. */
+function sessionContext(briefing: string): string {
+  return `Today: ${new Date().toISOString().slice(0, 10)}.
 
 <current_briefing>
 ${briefing}
@@ -418,11 +435,30 @@ export async function chat(
   const turn = conv.turns + 1;
 
   await syncInboxState(gmail);
-  const briefing = buildBriefing(await recentTriage(300, "open"));
+  const context = sessionContext(buildBriefing(await recentTriage(300, "open")));
   const memoryDigest = ""; // #8
 
+  // The API rejects a replayed thinking block if the system prompt, tools or any
+  // earlier message changed since it was produced, so everything sent is
+  // append-only. A session from before the system prompt was frozen replays
+  // without its old thinking blocks; they were bound to a since-changed prompt.
   const { messages: stored, nextSeq } = await loadMessages(convId);
+  const system = conv.system ?? systemPrompt(memoryDigest);
+  const prevWindow: HistoryWindow = {
+    start: conv.historyStart ?? 0,
+    thinkingFrom: conv.thinkingFrom ?? (conv.system ? 0 : nextSeq),
+  };
+  const window = planHistory(stored, prevWindow);
+  const history = replayHistory(stored, window);
+
   const newMessages: StoredMessage[] = [{ role: "user", content: userMessage }];
+  // Resend date + briefing when they changed, or when a cut may have dropped the last copy.
+  if (context !== conv.context || window.start !== prevWindow.start) {
+    newMessages.push({
+      role: "system",
+      content: `${isNew ? "This is the start of a new session." : "Context update; replaces the earlier briefing."}\n\n${context}`,
+    });
+  }
   const result: ChatResult = {
     conversation_id: convId,
     session: isNew ? "new" : "continued",
@@ -432,17 +468,30 @@ export async function chat(
     tools_used: [],
   };
   const ctx: ToolCtx = { gmail, model, convId, turn, userMessage, conv, result };
-  const system = systemPrompt(briefing, memoryDigest, isNew);
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-    const history = trimHistory([...stored, ...newMessages]);
-    const res = (await anthropic().messages.create({
+    const params = {
       model,
       max_tokens: 4096,
       system,
       tools: TOOLS,
-      messages: history as Anthropic.Messages.MessageParam[],
-    })) as Anthropic.Messages.Message;
+      // Safety net: if a replayed thinking block still doesn't match (e.g. a deploy
+      // changed TOOLS mid-session), drop its reasoning instead of failing the turn.
+      thinking: { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } },
+      messages: [...history, ...newMessages],
+    };
+    // Cast: adaptive thinking, block_binding and role "system" messages are newer than this SDK's types; sent as-is.
+    const res = (await anthropic().messages.create(
+      params as unknown as Anthropic.Messages.MessageCreateParamsNonStreaming,
+      { headers: { "anthropic-beta": THINKING_BINDING_BETA } },
+    )) as Anthropic.Messages.Message & { input_transformations?: unknown[] };
+    if (res.input_transformations?.length) {
+      logger.warn("Chat: API dropped thinking blocks from the replayed history", {
+        convId,
+        round,
+        transformations: res.input_transformations,
+      });
+    }
 
     newMessages.push({ role: "assistant", content: res.content });
 
@@ -476,6 +525,10 @@ export async function chat(
   await db.doc(`conversations/${convId}`).update({
     turns: FieldValue.increment(1),
     lastActiveAt: new Date().toISOString(),
+    system,
+    context,
+    historyStart: window.start,
+    thinkingFrom: window.thinkingFrom,
   });
   return result;
 }
