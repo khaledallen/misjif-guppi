@@ -92,8 +92,9 @@ export const renewWatch = onSchedule(
 // ---------------------------------------------------------------------------
 function authorized(req: Request): boolean {
   const header = req.get("authorization") ?? "";
-  const given = Buffer.from(header.replace(/^Bearer\s+/i, ""));
-  const expected = Buffer.from(GUPPI_API_TOKEN.value());
+  const given = Buffer.from(header.replace(/^Bearer\s+/i, "").trim());
+  // trim(): secrets set via a prompt or pipe often carry a trailing newline
+  const expected = Buffer.from(GUPPI_API_TOKEN.value().trim());
   return given.length === expected.length && expected.length > 0 && timingSafeEqual(given, expected);
 }
 
