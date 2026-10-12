@@ -18,6 +18,7 @@ let base;
 let mode = "normal"; // "normal" | "google401"
 let priorities = "# Priorities\n- initial rule\n";
 let lastTriageStatus = null;
+let lastChat = null;
 
 const TRIAGE = [
   {
@@ -61,6 +62,32 @@ before(async () => {
           res.setHeader("content-type", "application/json");
           return res.end(JSON.stringify(TRIAGE.slice(0, Number(url.searchParams.get("limit") || 50))));
         }
+        case "POST /api/chat": {
+          const msg = JSON.parse(body);
+          lastChat = msg;
+          res.setHeader("content-type", "application/json");
+          if (msg.message === "yes") {
+            return res.end(JSON.stringify({
+              conversation_id: "c1", session: "continued", reply: "[Applied. Re-ranked.]", proposals: [], tools_used: ["apply_priorities_change"],
+              applied: [{ diff: "+ - recruiters low unless interviewing", reason: "recruiter rule",
+                retriage: { checked: 5, failed: 0, moved: [{ threadId: "t1", from: "Pat <p@x.com>", subject: "Role", before: "normal/fyi", after: "low/fyi" }] } }],
+            }));
+          }
+          return res.end(JSON.stringify({
+            conversation_id: "c1", session: msg.session === "new" ? "new" : "continued",
+            reply: "[1 rule change proposed.]", applied: [], tools_used: ["propose_priorities_change"],
+            proposals: [{ id: "p1", diff: "  ## Rules\n+ - recruiters low unless interviewing", reason: "recruiter rule", can_apply_now: false }],
+          }));
+        }
+        case "GET /api/chat/session":
+          res.setHeader("content-type", "application/json");
+          return res.end(JSON.stringify({ conversation_id: "c1", lastActiveAt: new Date(Date.now() - 5 * 3600_000).toISOString(), idle_expired: true, turns: 3 }));
+        case "GET /api/priorities/history":
+          res.setHeader("content-type", "application/json");
+          return res.end(JSON.stringify([{ id: "v1", savedAt: "2026-10-11T20:00:00.000Z", source: "chat", reason: "recruiter rule", chars: 1200 }]));
+        case "POST /api/priorities/restore":
+          res.setHeader("content-type", "application/json");
+          return res.end(JSON.stringify({ status: "[Priorities restored.]", restored: { id: url.searchParams.get("id"), savedAt: "2026-10-11T20:00:00.000Z" } }));
         case "POST /api/sync":
           res.setHeader("content-type", "application/json");
           return res.end(JSON.stringify({ status: "[Inbox synced.]", closed: 4, reopened: 1, complete: true }));
@@ -303,4 +330,48 @@ test("help and unknown command", async () => {
   assert.match(h.stdout, /guppi priorities edit/);
   const u = await cli(["frobnicate"], sb.env);
   assert.equal(u.code, 2);
+});
+
+test("chat one-shot prints the server diff verbatim and asks for yes", async () => {
+  const sb = await initialized();
+  const r = await cli(["chat", "-m", "recruiters are low unless I'm interviewing there", "--new"], sb.env);
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(lastChat.session, "new");
+  assert.equal(lastChat.channel, "cli");
+  assert.match(r.stdout, /\[1 rule change proposed\.\]/);
+  assert.match(r.stdout, /\[Proposed priorities change p1\] recruiter rule/);
+  assert.match(r.stdout, /^\+ - recruiters low unless interviewing$/m);
+  assert.match(r.stdout, /Reply 'yes' to apply/);
+});
+
+test("chat positional message, applied result shows re-triage moves", async () => {
+  const sb = await initialized();
+  const r = await cli(["chat", "yes"], sb.env);
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /\[Applied\] recruiter rule/);
+  assert.match(r.stdout, /\[Re-triaged 5\. 1 moved\.\]/);
+  assert.match(r.stdout, /normal\/fyi -> low\/fyi  Pat: Role/);
+});
+
+test("chat REPL: session notice, /briefing, /continue, message, /quit", async () => {
+  const sb = await initialized();
+  const r = await cli(["chat"], sb.env, "/briefing\n/continue\nhello\n/quit\n");
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /Last session ended 5\.0 h ago/);
+  assert.match(r.stdout, /\[Briefing\. 1 action item/);
+  assert.equal(lastChat.message, "hello");
+  assert.equal(lastChat.session, "continue");
+  assert.match(r.stdout, /\[1 rule change proposed\.\]/);
+});
+
+test("priorities history and restore", async () => {
+  const sb = await initialized();
+  const h = await cli(["priorities", "history"], sb.env);
+  assert.equal(h.code, 0, h.stderr);
+  assert.match(h.stdout, /v1\s+2026-10-11 20:00:00\s+chat\s+1200\s+recruiter rule/);
+  const r = await cli(["priorities", "restore", "v1"], sb.env);
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /\[Priorities restored\.\] Version from 2026-10-11/);
+  const bad = await cli(["priorities", "restore"], sb.env);
+  assert.equal(bad.code, 2);
 });

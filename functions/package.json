@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "test": "tsc && node --test test/*.test.mjs",
     "get-token": "node scripts/get-gmail-token.mjs"
   },
   "dependencies": {

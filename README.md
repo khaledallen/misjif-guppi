@@ -146,6 +146,10 @@ guppi backfill --n 50 --days 7 [--force]      # --force re-triages after a prior
 guppi priorities edit                         # opens $EDITOR, shows a diff, uploads on save
 guppi priorities get > priorities.md
 guppi priorities put priorities.md
+guppi chat                                    # talk to GUPPI (/new /continue /briefing /quit)
+guppi chat -m "what needs my attention?"      # one-shot
+guppi priorities history                      # every change is versioned
+guppi priorities restore <id>
 guppi watch | guppi health
 guppi token refresh | guppi token clear
 ```
@@ -171,7 +175,26 @@ Raw curl still works if you need it:
 | `GET /briefing` | bearer | GUPPI-format text briefing |
 | `GET /triage?limit=&status=` | bearer | triage records (JSON); `status=open\|done\|dismissed\|all` (default all) |
 | `POST /sync` | bearer | close items whose threads left the inbox; reopen ones that came back |
-| `GET/PUT /priorities` | bearer | read / replace the priorities markdown |
+| `GET/PUT /priorities` | bearer | read / replace the priorities markdown (previous version saved) |
+| `GET /priorities/history` | bearer | previous versions (`?full=1` includes markdown) |
+| `POST /priorities/restore?id=` | bearer | roll back to a previous version |
+| `POST /chat` | bearer | `{message, session: auto\|new\|continue, channel}` → GUPPI reply, proposals, applied changes |
+| `GET /chat/session` | bearer | current session info |
+
+## Chat (`guppi chat`)
+GUPPI answers from your triage queue and can change the priorities doc conversationally.
+
+- **Sessions:** a new session starts after 4 hours idle; `/continue` resumes the previous one, `/new` starts
+  fresh. Each session starts with the current briefing loaded. Durable learning lives in the priorities doc
+  (and, later, explicit memory, #8), not in the conversation.
+- **Priority changes:** GUPPI proposes a full new version; you see a **server-generated diff** (never the
+  model's paraphrase) and reply `yes` to apply. Saying "always"/"from now on" applies in the same turn. The
+  check is done by the server on your own words, so the model can't apply a change you didn't confirm.
+  Every change is versioned (`guppi priorities history` / `restore`), logged in the Corrections log, and
+  followed by an automatic re-triage of open threads that reports what moved.
+- **Reading email:** the chat model never sees raw email text. Questions needing the full text go to a
+  **quarantined reader**, a separate model call with no tools, and only its answer comes back. Injected
+  instructions in an email can't reach the chat's tools.
 
 ## Safety notes
 - **Fail visible:** a thread that can't be triaged (API error, output cut off) is recorded as a
