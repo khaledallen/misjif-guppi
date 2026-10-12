@@ -24,8 +24,14 @@ You always have the current contents of priorities.md. It overrides your own jud
 Input:
 <priorities>{priorities.md}</priorities>
 <thread>
-from, to, cc, date, subject, last 3 messages (trimmed), whether Khaled has replied before
+from, to, cc, date, subject, last 3 messages (trimmed), whether Khaled has replied before,
+who sent the latest message (other | khaled | khaled_note_to_self), days since it
 </thread>
+
+Every inbox thread is triaged, including ones where Khaled sent the latest message. He archives
+after sending, so those are deliberate: a note to self (classify as the task it describes), a
+follow-up nobody answered in 2+ days ("Follow up with <name>:", draft_reply), or a fresh send
+he wants tracked ("Awaiting <name>:", deadline 2 days out).
 
 Instructions:
 Classify this thread using priorities.md. Prefer the most specific rule that applies:
