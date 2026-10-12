@@ -153,6 +153,39 @@ test("replayed history is append-only between cuts; a cut strips the kept turns'
   assert.ok(afterCut.length > 0 && afterCut.some(hasThinking));
 });
 
+test("skippedToolResults answers every pending tool_use, so the stored turn replays cleanly", () => {
+  const last = {
+    role: "assistant",
+    content: [
+      { type: "thinking", thinking: "", signature: "s" },
+      { type: "text", text: "Checking both." },
+      { type: "tool_use", id: "t1", name: "get_triage", input: {} },
+      { type: "tool_use", id: "t2", name: "list_triage", input: {} },
+    ],
+  };
+  const skipped = L.skippedToolResults(last.content, "Stopped.");
+  assert.deepEqual(skipped, [
+    { type: "tool_result", tool_use_id: "t1", content: "Stopped.", is_error: true },
+    { type: "tool_result", tool_use_id: "t2", content: "Stopped.", is_error: true },
+  ]);
+  assert.equal(last.content.length, 4, "assistant message not edited");
+  // Appended as its own user message: not a turn start, so no cut can land between it and the tool_use.
+  const closing = { role: "user", content: skipped };
+  assert.ok(!L.isUserTurnStart(closing));
+  const stored = [...turn(0), { role: "user", content: "q1" }, last, closing, { role: "user", content: "q2" }];
+  for (let i = 0; i < stored.length; i++) {
+    const m = stored[i];
+    if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+    const ids = m.content.filter((b) => b.type === "tool_use").map((b) => b.id);
+    if (!ids.length) continue;
+    const next = stored[i + 1]?.content;
+    const answered = Array.isArray(next) ? next.filter((b) => b.type === "tool_result").map((b) => b.tool_use_id) : [];
+    assert.deepEqual(answered, ids, `tool_use at ${i} answered in the next message`);
+  }
+  assert.deepEqual(L.skippedToolResults([{ type: "text", text: "done" }], "x"), []);
+  assert.deepEqual(L.skippedToolResults("plain text", "x"), []);
+});
+
 test("planHistory leaves short histories alone", () => {
   const stored = [...turn(0), ...turn(1)];
   const win = { start: 0, thinkingFrom: 0 };

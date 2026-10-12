@@ -89,6 +89,33 @@ export function replayHistory<T extends StoredMessage>(messages: T[], win: Histo
   return messages.slice(win.start).map((m, k) => (win.start + k < win.thinkingFrom ? stripThinking(m) : m));
 }
 
+/** An error tool_result for a tool_use the loop did not run. */
+export interface SkippedToolResult {
+  type: "tool_result";
+  tool_use_id: string;
+  content: string;
+  is_error: true;
+}
+
+/**
+ * Error tool_results for every tool_use in an assistant message's content. The API
+ * rejects any history where a tool_use isn't answered in the next message, so when
+ * the loop stops without running them (round limit, truncated response) these go in
+ * a user message right after it. Appending keeps the history append-only; removing
+ * the tool_use instead would invalidate its thinking block.
+ */
+export function skippedToolResults(content: unknown, note: string): SkippedToolResult[] {
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter((b: { type?: string; id?: unknown }) => b?.type === "tool_use" && typeof b.id === "string")
+    .map((b: { id: string }): SkippedToolResult => ({
+      type: "tool_result",
+      tool_use_id: b.id,
+      content: note,
+      is_error: true,
+    }));
+}
+
 /** Should the next message start a new session? */
 export function shouldStartNewSession(
   lastActiveMs: number | null,

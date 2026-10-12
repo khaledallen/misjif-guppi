@@ -17,6 +17,7 @@ import {
   planHistory,
   replayHistory,
   shouldStartNewSession,
+  skippedToolResults,
   type HistoryWindow,
   type StoredMessage,
 } from "./chatlogic";
@@ -514,6 +515,14 @@ export async function chat(
     newMessages.push({ role: "assistant", content: res.content });
 
     if (res.stop_reason !== "tool_use" || round === MAX_TOOL_ROUNDS) {
+      // An unanswered tool_use would make every later request in this session a 400.
+      const skipped = skippedToolResults(
+        res.content,
+        res.stop_reason === "tool_use"
+          ? "Stopped: too many tool steps this turn."
+          : `Not run: response ended (${res.stop_reason}).`,
+      );
+      if (skipped.length) newMessages.push({ role: "user", content: skipped });
       result.reply =
         res.content
           .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
