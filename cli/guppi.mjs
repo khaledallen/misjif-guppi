@@ -213,7 +213,7 @@ async function api(path, opts = {}) {
     const failure = await describeAuthFailure(res);
     if (failure.kind === "app" && source === "cache") {
       // Cached token may be stale (secret rotated). Refetch once and retry.
-      ({ token, source } = resolveToken(project, { refresh: true }));
+      ({ token } = resolveToken(project, { refresh: true }));
       res = await rawRequest(url, { ...opts, token });
       if (res.status !== 401 && res.status !== 403) return res;
       const again = await describeAuthFailure(res);

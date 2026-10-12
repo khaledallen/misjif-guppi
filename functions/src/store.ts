@@ -74,7 +74,7 @@ export async function setPriorities(markdown: string, meta: { source?: string; r
 export async function prioritiesHistory(limit = 20, withMarkdown = false): Promise<PrioritiesVersion[]> {
   const snap = await db.collection("priorities_history").orderBy("savedAt", "desc").limit(limit).get();
   return snap.docs.map((d) => {
-    const v = d.data();
+    const v = d.data() as Omit<PrioritiesVersion, "id"> & { markdown: string };
     return {
       id: d.id,
       savedAt: v.savedAt,

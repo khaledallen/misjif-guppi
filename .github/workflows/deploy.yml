@@ -24,6 +24,19 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm test   # tsc build + backend unit tests
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      # Type-aware lint rules read the functions' dependency types.
+      - run: npm install --no-audit --no-fund
+        working-directory: functions
+      - run: npm run lint
+
   cli:
     runs-on: ubuntu-latest
     defaults:
@@ -37,7 +50,7 @@ jobs:
       - run: npm test
 
   deploy:
-    needs: [build, cli]
+    needs: [build, lint, cli]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
