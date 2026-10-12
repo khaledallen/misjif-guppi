@@ -35,11 +35,9 @@ export async function triageThreads(
           stats.skipped++;
           continue;
         }
-        // Khaled's own outgoing message is the latest: nothing new to triage.
-        if (thread.messages[thread.messages.length - 1]?.sentByMe) {
-          stats.skipped++;
-          continue;
-        }
+        // No skip when Khaled sent the latest message: he archives after sending,
+        // so a thread like that in the inbox is a note to self, one he left for
+        // GUPPI, or a resurfaced follow-up. The triage prompt tells them apart.
         const result = await triageThread(thread, priorities, model);
         await saveTriage(thread, result, model);
         stats.triaged++;
