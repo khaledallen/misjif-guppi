@@ -155,7 +155,7 @@ export const api = onRequest(
         }
         case "GET /triage": {
           const limit = Math.min(Number(req.query.limit ?? 200) || 200, 1000);
-          const status = req.query.status === "all" ? undefined : ((req.query.status as string) || undefined);
+          const status = req.query.status === "all" ? undefined : (req.query.status as string) || undefined;
           if (status && !["open", "done", "dismissed"].includes(status)) {
             res.status(400).send("[Rejected. status must be open, done, dismissed or all.]");
             return;

@@ -76,7 +76,10 @@ export interface RetriageReport {
 // ---------------------------------------------------------------------------
 const stateRef = db.doc("state/chat");
 
-async function resolveSession(mode: SessionMode, channel: string): Promise<{ id: string; conv: ConversationDoc; isNew: boolean }> {
+async function resolveSession(
+  mode: SessionMode,
+  channel: string,
+): Promise<{ id: string; conv: ConversationDoc; isNew: boolean }> {
   const state = await stateRef.get();
   const currentId = state.exists ? (state.get("currentId") as string | undefined) : undefined;
   if (currentId) {
@@ -96,7 +99,12 @@ async function resolveSession(mode: SessionMode, channel: string): Promise<{ id:
   return { id: ref.id, conv, isNew: true };
 }
 
-export async function sessionInfo(): Promise<{ conversation_id: string | null; lastActiveAt: string | null; idle_expired: boolean; turns: number }> {
+export async function sessionInfo(): Promise<{
+  conversation_id: string | null;
+  lastActiveAt: string | null;
+  idle_expired: boolean;
+  turns: number;
+}> {
   const state = await stateRef.get();
   const id = state.exists ? (state.get("currentId") as string | undefined) : undefined;
   if (!id) return { conversation_id: null, lastActiveAt: null, idle_expired: true, turns: 0 };
@@ -114,12 +122,10 @@ export async function sessionInfo(): Promise<{ conversation_id: string | null; l
 
 async function loadMessages(convId: string): Promise<{ messages: StoredMessage[]; nextSeq: number }> {
   const snap = await db.collection(`conversations/${convId}/messages`).orderBy("seq").get();
-  const messages = snap.docs.map(
-    (d): StoredMessage => ({
-      role: d.get("role") as StoredMessage["role"],
-      content: JSON.parse(d.get("content") as string) as unknown,
-    }),
-  );
+  const messages = snap.docs.map((d): StoredMessage => ({
+    role: d.get("role") as StoredMessage["role"],
+    content: JSON.parse(d.get("content") as string) as unknown,
+  }));
   return { messages, nextSeq: snap.size };
 }
 
@@ -341,7 +347,10 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: ToolCt
     case "list_triage": {
       const status = (input.status as string) || "open";
       const limit = Math.min(Number(input.limit) || 30, 100);
-      let rows = await recentTriage(Math.max(limit * 3, 100), status === "all" ? undefined : (status as "open" | "done"));
+      let rows = await recentTriage(
+        Math.max(limit * 3, 100),
+        status === "all" ? undefined : (status as "open" | "done"),
+      );
       if (input.category) rows = rows.filter((r) => r.category === input.category);
       if (input.priority) rows = rows.filter((r) => r.priority === input.priority);
       if (input.judgment_only) rows = rows.filter((r) => /^judgment/i.test(r.rule_applied || ""));
@@ -368,7 +377,8 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: ToolCt
       return { markdown: await getPriorities() };
     case "propose_priorities_change": {
       const markdown = text(input.new_markdown);
-      if (markdown.trim().length < 20 || markdown.length > 20_000) return { error: "new_markdown must be the full document (20–20000 chars)." };
+      if (markdown.trim().length < 20 || markdown.length > 20_000)
+        return { error: "new_markdown must be the full document (20–20000 chars)." };
       const base = await getPriorities();
       const diff = lineDiff(base, markdown);
       if (!diff) return { error: "No change from the current priorities." };

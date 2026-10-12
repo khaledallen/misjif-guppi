@@ -10,7 +10,15 @@ test("isAffirmative accepts only plain confirmations", () => {
   for (const s of ["yes", "Yes.", "y", "apply", "do it", "ok!", "go ahead", "  sure  ", "sounds good"]) {
     assert.ok(L.isAffirmative(s), s);
   }
-  for (const s of ["yes but make it high", "no", "yes, and also archive it", "maybe", "", "yesterday", "apply the other one"]) {
+  for (const s of [
+    "yes but make it high",
+    "no",
+    "yes, and also archive it",
+    "maybe",
+    "",
+    "yesterday",
+    "apply the other one",
+  ]) {
     assert.ok(!L.isAffirmative(s), s);
   }
 });
@@ -80,7 +88,10 @@ test("stripThinking removes thinking blocks only from assistant messages", () =>
       { type: "tool_use", id: "t1", name: "x", input: {} },
     ],
   };
-  assert.deepEqual(L.stripThinking(a).content.map((b) => b.type), ["text", "tool_use"]);
+  assert.deepEqual(
+    L.stripThinking(a).content.map((b) => b.type),
+    ["text", "tool_use"],
+  );
   assert.equal(a.content.length, 4, "input not mutated");
   const onlyThinking = { role: "assistant", content: [{ type: "thinking", thinking: "", signature: "s" }] };
   assert.deepEqual(L.stripThinking(onlyThinking).content, [{ type: "text", text: "[No reply.]" }]);
@@ -93,9 +104,21 @@ function turn(k) {
   return [
     { role: "user", content: `q${k}` },
     { role: "system", content: `ctx${k}` },
-    { role: "assistant", content: [{ type: "thinking", thinking: "", signature: `s${k}a` }, { type: "tool_use", id: `t${k}`, name: "x", input: {} }] },
+    {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "", signature: `s${k}a` },
+        { type: "tool_use", id: `t${k}`, name: "x", input: {} },
+      ],
+    },
     { role: "user", content: [{ type: "tool_result", tool_use_id: `t${k}`, content: "r" }] },
-    { role: "assistant", content: [{ type: "thinking", thinking: "", signature: `s${k}b` }, { type: "text", text: `a${k}` }] },
+    {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "", signature: `s${k}b` },
+        { type: "text", text: `a${k}` },
+      ],
+    },
   ];
 }
 const hasThinking = (m) => Array.isArray(m.content) && m.content.some((b) => b.type === "thinking");

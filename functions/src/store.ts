@@ -129,7 +129,11 @@ export async function saveTriage(thread: SimpleThread, result: TriageResult, mod
 
 export async function recentTriage(limit = 300, status?: TriageRecord["status"]): Promise<TriageRecord[]> {
   // Filter in memory to avoid needing a composite index (single user, small volume).
-  const snap = await db.collection("triage").orderBy("triagedAt", "desc").limit(status ? limit * 3 : limit).get();
+  const snap = await db
+    .collection("triage")
+    .orderBy("triagedAt", "desc")
+    .limit(status ? limit * 3 : limit)
+    .get();
   const all = snap.docs.map((d) => d.data() as TriageRecord);
   return (status ? all.filter((r) => (r.status ?? "open") === status) : all).slice(0, limit);
 }
@@ -143,7 +147,11 @@ export async function reconcileWithInbox(
   inbox: Set<string>,
   opts: { allowClose: boolean; window?: number },
 ): Promise<{ closed: number; reopened: number }> {
-  const snap = await db.collection("triage").orderBy("triagedAt", "desc").limit(opts.window ?? 500).get();
+  const snap = await db
+    .collection("triage")
+    .orderBy("triagedAt", "desc")
+    .limit(opts.window ?? 500)
+    .get();
   const now = new Date().toISOString();
   let batch = db.batch();
   let pending = 0;
