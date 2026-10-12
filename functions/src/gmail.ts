@@ -16,6 +16,7 @@ export interface SimpleMessage {
   subject: string;
   body: string;
   sentByMe: boolean;
+  noteToSelf: boolean; // sent by Khaled to no one but himself
 }
 
 export interface SimpleThread {
@@ -64,7 +65,7 @@ export async function threadsChangedSince(
       const res = await gmail.users.history.list({
         userId: "me",
         startHistoryId,
-        historyTypes: ["messageAdded"],
+        historyTypes: ["messageAdded", "labelAdded"],
         labelId: "INBOX",
         pageToken,
       });
@@ -72,6 +73,11 @@ export async function threadsChangedSince(
         for (const added of h.messagesAdded ?? []) {
           const m = added.message;
           if (m?.threadId && m.labelIds?.includes("INBOX")) threadIds.add(m.threadId);
+        }
+        // Threads put back in the inbox (unsnoozed, moved back) arrive as label changes.
+        for (const added of h.labelsAdded ?? []) {
+          const m = added.message;
+          if (m?.threadId && added.labelIds?.includes("INBOX")) threadIds.add(m.threadId);
         }
       }
       if (res.data.historyId) latestHistoryId = String(res.data.historyId);
@@ -134,7 +140,7 @@ export async function fetchThread(gmail: gmail_v1.Gmail, threadId: string): Prom
     from: lastIncoming.from,
     receivedAt: new Date(Number(last.internalDate ?? Date.now())).toISOString(),
     inInbox: all.some((m) => m.labelIds?.includes("INBOX")),
-    repliedBefore: simple.some((m) => m.sentByMe),
+    repliedBefore: simple.some((m) => m.sentByMe && !m.noteToSelf),
     messages: recent,
   };
 }
@@ -142,6 +148,8 @@ export async function fetchThread(gmail: gmail_v1.Gmail, threadId: string): Prom
 function toSimpleMessage(m: gmail_v1.Schema$Message): SimpleMessage {
   const headers = m.payload?.headers ?? [];
   const h = (name: string) => headers.find((x) => x.name?.toLowerCase() === name)?.value ?? "";
+  // SENT is only applied to mail sent from this account, so outside senders can't fake it.
+  const sentByMe = !!m.labelIds?.includes("SENT");
   return {
     id: m.id ?? "",
     from: h("from"),
@@ -150,8 +158,21 @@ function toSimpleMessage(m: gmail_v1.Schema$Message): SimpleMessage {
     date: h("date"),
     subject: h("subject"),
     body: truncate(extractBody(m.payload) || m.snippet || "", MAX_BODY_CHARS),
-    sentByMe: !!m.labelIds?.includes("SENT"),
+    sentByMe,
+    noteToSelf: sentByMe && isNoteToSelf(h("from"), [h("to"), h("cc"), h("bcc")]),
   };
+}
+
+/** Lowercased email addresses in a header value, with any +tag dropped. */
+export function addresses(header: string): string[] {
+  return (header.match(/[^\s<>,;:"']+@[^\s<>,;:"']+/g) ?? []).map((a) => a.toLowerCase().replace(/\+[^@]*@/, "@"));
+}
+
+/** True if the message has recipients and every one of them is the sender. */
+export function isNoteToSelf(from: string, recipientHeaders: string[]): boolean {
+  const [sender] = addresses(from);
+  const recipients = recipientHeaders.flatMap(addresses);
+  return !!sender && recipients.length > 0 && recipients.every((r) => r === sender);
 }
 
 function extractBody(part: gmail_v1.Schema$MessagePart | undefined): string {

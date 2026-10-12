@@ -106,8 +106,15 @@ export async function setGmailState(update: { historyId?: string; watchExpiratio
 /** True if this thread's latest message has already been triaged. */
 export async function alreadyTriaged(threadId: string, lastMessageId: string): Promise<boolean> {
   const snap = await db.doc(`triage/${threadId}`).get();
-  // Failed triage stand-ins don't count: retry them.
-  return snap.exists && snap.get("lastMessageId") === lastMessageId && snap.get("rule_applied") !== "triage_failed";
+  return (
+    snap.exists &&
+    snap.get("lastMessageId") === lastMessageId &&
+    // Failed triage stand-ins don't count: retry them.
+    snap.get("rule_applied") !== "triage_failed" &&
+    // Callers only ask about inbox threads, so a record closed for leaving the
+    // inbox means the thread came back (e.g. a follow-up): triage it fresh.
+    !(snap.get("status") === "done" && snap.get("closedReason") === "left_inbox")
+  );
 }
 
 export async function saveTriage(thread: SimpleThread, result: TriageResult, model: string): Promise<void> {
