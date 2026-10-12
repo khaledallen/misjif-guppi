@@ -1,0 +1,16 @@
+{
+  "name": "guppi-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Command-line client for the GUPPI API",
+  "type": "module",
+  "bin": {
+    "guppi": "guppi.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
