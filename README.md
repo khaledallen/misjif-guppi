@@ -2,7 +2,7 @@
 
 A GUPPI (Bobiverse-style) assistant that manages personal email and talks about priorities.
 
-**Current phase: 1 — read-only ingest + triage.** GUPPI watches the inbox, classifies every new
+**Current phase: 1 — read-only ingest + triage (live: watch, push triage and briefings verified 2026-10-11).** GUPPI watches the inbox, classifies every new
 thread against `priorities` (a living markdown doc), and produces briefings. It holds a
 `gmail.readonly` token, so it *cannot* change, archive or send anything yet.
 
@@ -75,6 +75,8 @@ gcloud pubsub topics add-iam-policy-binding gmail-push \
    ```
 
 ### 4. Secrets (Secret Manager)
+The name goes on the command line exactly as written (UPPER_SNAKE_CASE); the CLI then prompts for
+the value. List what exists with `gcloud secrets list`.
 ```bash
 firebase use $PROJECT
 firebase functions:secrets:set ANTHROPIC_API_KEY
@@ -101,9 +103,20 @@ In the GitHub repo → Settings → Secrets and variables → Actions:
 - **Secret** `FIREBASE_SERVICE_ACCOUNT` = contents of `key.json` (then delete the local file)
 - **Variable** `FIREBASE_PROJECT_ID` = your project id
 
+Use **repo** secrets/variables, not environment ones. If `key.json` comes out empty, the service
+account didn't exist yet when the key command ran — confirm with `gcloud iam service-accounts list`
+and rerun it.
+
 Push to `main` → the workflow builds and deploys. (Or deploy once by hand: `firebase deploy`.)
 
 ### 6. Start it
+If authenticated calls return 401 with a Google error page (not `[Unauthorized.]`), the deploy
+didn't make the function publicly invokable. Fix it once — the bearer token still guards every route:
+```bash
+gcloud run services add-iam-policy-binding api --region=us-central1 --project=$PROJECT \
+  --member=allUsers --role=roles/run.invoker
+```
+Then:
 ```bash
 API=https://us-central1-$PROJECT.cloudfunctions.net/api   # check the URL printed by deploy
 TOKEN=<your GUPPI_API_TOKEN>
