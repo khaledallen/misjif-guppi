@@ -137,7 +137,9 @@ guppi briefing
 
 ```bash
 guppi briefing                                # the briefing
-guppi triage                                  # all calls, sorted by priority
+guppi triage                                  # open calls (still in the inbox), sorted by priority
+guppi triage --all                            # include archived/handled threads (grading)
+guppi sync                                    # re-check what's still in the inbox (also automatic)
 guppi triage --judgment                       # only calls no rule covered: what to write rules for
 guppi triage --wide | --json | --limit 200
 guppi backfill --n 50 --days 7 [--force]      # --force re-triages after a priorities change
@@ -167,10 +169,16 @@ Raw curl still works if you need it:
 | `POST /watch` | bearer | start/renew Gmail watch, set baseline historyId |
 | `POST /backfill?n=&days=&force=1` | bearer | triage recent inbox threads |
 | `GET /briefing` | bearer | GUPPI-format text briefing |
-| `GET /triage?limit=` | bearer | raw triage records (JSON) |
+| `GET /triage?limit=&status=` | bearer | triage records (JSON); `status=open\|done\|dismissed\|all` (default all) |
+| `POST /sync` | bearer | close items whose threads left the inbox; reopen ones that came back |
 | `GET/PUT /priorities` | bearer | read / replace the priorities markdown |
 
 ## Safety notes
+- **Fail visible:** a thread that can't be triaged (API error, output cut off) is recorded as a
+  zero-confidence `triage_failed` item under "Needs your call" and retried on the next backfill.
+  It never silently disappears.
+- **Inbox sync:** briefings and `/triage` reconcile with the live inbox, so archived or deleted
+  threads drop out of the open queue.
 - Email content is treated as untrusted data; threads that try to instruct GUPPI are flagged
   (`injection_suspected`) and surfaced in the briefing.
 - Firestore rules deny all client access; only the functions (Admin SDK) touch data.

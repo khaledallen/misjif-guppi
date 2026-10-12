@@ -101,6 +101,22 @@ export async function listInboxThreadIds(gmail: gmail_v1.Gmail, max: number, que
   return ids;
 }
 
+/**
+ * All thread ids currently in INBOX, up to `cap`. `complete` is false if the
+ * inbox is larger than the cap, so callers can avoid closing items they
+ * simply didn't see.
+ */
+export async function inboxSnapshot(gmail: gmail_v1.Gmail, cap = 2000): Promise<{ ids: Set<string>; complete: boolean }> {
+  const ids = new Set<string>();
+  let pageToken: string | undefined;
+  do {
+    const res = await gmail.users.threads.list({ userId: "me", labelIds: ["INBOX"], maxResults: 500, pageToken });
+    for (const t of res.data.threads ?? []) if (t.id) ids.add(t.id);
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken && ids.size < cap);
+  return { ids, complete: !pageToken };
+}
+
 export async function fetchThread(gmail: gmail_v1.Gmail, threadId: string): Promise<SimpleThread | null> {
   const res = await gmail.users.threads.get({ userId: "me", id: threadId, format: "full" });
   const all = res.data.messages ?? [];
