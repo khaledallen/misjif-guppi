@@ -60,6 +60,11 @@ export function buildBriefing(records: TriageRecord[]): string {
     }
   }
 
+  const failed = open.filter((r) => r.rule_applied === "triage_failed");
+  if (failed.length) {
+    lines.push("", `[Alert. ${failed.length} thread(s) could not be triaged and are listed under "Needs your call". Re-run backfill to retry.]`);
+  }
+
   if (flagged.length) {
     lines.push("", `[Warning. ${flagged.length} thread(s) contained text attempting to instruct GUPPI. Ignored.]`);
   }

@@ -295,6 +295,13 @@ async function cmdBriefing() {
   console.log((await res.text()).trimEnd());
 }
 
+async function cmdSync() {
+  const res = await api("/sync", { method: "POST" });
+  const d = await res.json();
+  console.log(`${d.status} ${d.closed} closed (left the inbox), ${d.reopened} reopened.`);
+  if (!d.complete) console.log("[Inbox larger than the sync window; nothing was closed to be safe.]");
+}
+
 async function cmdWatch() {
   const res = await api("/watch", { method: "POST" });
   const data = await res.json();
@@ -329,14 +336,16 @@ function pad(s, n) {
 
 async function cmdTriage(flags) {
   const limit = flags.limit ?? 50;
-  const res = await api(`/triage?limit=${encodeURIComponent(limit)}`);
+  // Default: only what's still in the inbox. --all includes archived/handled threads (for grading).
+  const status = flags.all ? "all" : flags.status || "open";
+  const res = await api(`/triage?limit=${encodeURIComponent(limit)}&status=${encodeURIComponent(status)}`);
   const records = await res.json();
   if (flags.json) {
     console.log(JSON.stringify(records, null, 2));
     return;
   }
   if (!records.length) {
-    console.log("[No triage records yet. Run: guppi backfill]");
+    console.log(status === "open" ? "[Nothing open. Inbox clear, or run: guppi backfill]" : "[No triage records yet. Run: guppi backfill]");
     return;
   }
   const filtered = flags.judgment ? records.filter((r) => /^judgment/i.test(r.rule_applied || "")) : records;
@@ -355,6 +364,8 @@ async function cmdTriage(flags) {
         flag,
     );
   }
+  const failed = records.filter((r) => r.rule_applied === "triage_failed").length;
+  if (failed) console.log(`[${failed} could not be triaged (rule: triage_failed). Retry with: guppi backfill]`);
   const judgment = records.filter((r) => /^judgment/i.test(r.rule_applied || "")).length;
   console.log(`\n[${filtered.length} shown. ${judgment} of ${records.length} decided by judgment, not a rule.${flags.judgment ? "" : " Show only those: guppi triage --judgment"}]`);
 }
@@ -428,8 +439,10 @@ Setup
 
 Inbox
   guppi briefing                          GUPPI-format briefing
-  guppi triage [--limit N] [--judgment] [--wide] [--json]
-                                          triage records; --judgment shows calls no rule covered
+  guppi triage [--limit N] [--all] [--judgment] [--wide] [--json]
+                                          threads still in the inbox (--all: include handled ones);
+                                          --judgment shows calls no rule covered
+  guppi sync                              re-check which triaged threads are still in the inbox
   guppi backfill [--n 50] [--days 7] [--force]
                                           triage recent inbox threads (--force re-triages all)
   guppi watch                             start/renew the Gmail watch
@@ -454,6 +467,7 @@ async function main() {
     case "health": return cmdHealth();
     case "briefing": return cmdBriefing();
     case "watch": return cmdWatch();
+    case "sync": return cmdSync();
     case "backfill": return cmdBackfill(flags);
     case "triage": return cmdTriage(flags);
     case "priorities": return cmdPriorities(positional);

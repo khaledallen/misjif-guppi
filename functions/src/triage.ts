@@ -98,7 +98,8 @@ export async function triageThread(thread: SimpleThread, priorities: string, mod
   const today = new Date().toISOString().slice(0, 10);
   const params = {
     model,
-    max_tokens: 1024,
+    // Generous: hitting the cap fails the call. Normal replies are ~150 tokens.
+    max_tokens: 4096,
     system: SYSTEM_PROMPT,
     // Structured outputs: the reply's text block is JSON matching TRIAGE_SCHEMA.
     output_config: { format: { type: "json_schema", schema: TRIAGE_SCHEMA } },
@@ -125,7 +126,9 @@ ${renderThread(thread)}`,
     params as unknown as Anthropic.Messages.MessageCreateParamsNonStreaming,
   )) as Anthropic.Messages.Message;
 
-  if (res.stop_reason !== "end_turn") throw new Error(`Triage incomplete (stop_reason=${res.stop_reason})`);
+  if (res.stop_reason !== "end_turn") {
+    throw new Error(`Triage incomplete (stop_reason=${res.stop_reason}, output_tokens=${res.usage?.output_tokens})`);
+  }
   const text = res.content
     .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
     .map((b) => b.text)
@@ -135,6 +138,26 @@ ${renderThread(thread)}`,
   } catch {
     throw new Error(`Triage returned non-JSON: ${text.slice(0, 200)}`);
   }
+}
+
+/**
+ * Stand-in result when triage fails, so the thread is surfaced for a human
+ * decision instead of silently disappearing (fail visible, not fail open).
+ */
+export const TRIAGE_FAILED_RULE = "triage_failed";
+export function failedTriage(err: unknown): TriageResult {
+  return {
+    category: "action",
+    priority: "normal",
+    deadline: null,
+    waiting_on_me: false,
+    effort: "short",
+    summary: `[Triage failed: ${String(err).replace(/^Error:\s*/, "").slice(0, 120)}]`,
+    proposed_action: "none",
+    rule_applied: TRIAGE_FAILED_RULE,
+    confidence: 0,
+    injection_suspected: false,
+  };
 }
 
 function normalize(r: Partial<TriageResult>): TriageResult {

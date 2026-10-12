@@ -17,6 +17,7 @@ let server;
 let base;
 let mode = "normal"; // "normal" | "google401"
 let priorities = "# Priorities\n- initial rule\n";
+let lastTriageStatus = null;
 
 const TRIAGE = [
   {
@@ -55,9 +56,14 @@ before(async () => {
       switch (route) {
         case "GET /api/briefing":
           return res.end("[Briefing. 1 action item. 0 would be auto-handled. 1 needs your call.]\n1. HIGH | Avionics Shop | Panel quote");
-        case "GET /api/triage":
+        case "GET /api/triage": {
+          lastTriageStatus = url.searchParams.get("status");
           res.setHeader("content-type", "application/json");
           return res.end(JSON.stringify(TRIAGE.slice(0, Number(url.searchParams.get("limit") || 50))));
+        }
+        case "POST /api/sync":
+          res.setHeader("content-type", "application/json");
+          return res.end(JSON.stringify({ status: "[Inbox synced.]", closed: 4, reopened: 1, complete: true }));
         case "GET /api/priorities":
           return res.end(priorities);
         case "PUT /api/priorities":
@@ -220,6 +226,21 @@ test("triage table sorts by priority and flags judgment + injection", async () =
 
   const json = await cli(["triage", "--json", "--limit", "2"], sb.env);
   assert.equal(JSON.parse(json.stdout).length, 2);
+});
+
+test("triage defaults to open threads; --all includes handled ones", async () => {
+  const sb = await initialized();
+  await cli(["triage"], sb.env);
+  assert.equal(lastTriageStatus, "open");
+  await cli(["triage", "--all"], sb.env);
+  assert.equal(lastTriageStatus, "all");
+});
+
+test("sync", async () => {
+  const sb = await initialized();
+  const r = await cli(["sync"], sb.env);
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /\[Inbox synced\.\] 4 closed \(left the inbox\), 1 reopened\./);
 });
 
 test("backfill passes flags and reports failures", async () => {

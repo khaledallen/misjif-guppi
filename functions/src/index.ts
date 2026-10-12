@@ -16,7 +16,7 @@ import {
   TRIAGE_MODEL,
 } from "./config";
 import { gmailClient, HistoryExpiredError, listInboxThreadIds, startWatch, threadsChangedSince } from "./gmail";
-import { triageThreads } from "./pipeline";
+import { syncInboxState, triageThreads } from "./pipeline";
 import { getHistoryId, getPriorities, recentTriage, setGmailState, setPriorities } from "./store";
 import { buildBriefing } from "./briefing";
 
@@ -61,6 +61,7 @@ export const gmailPush = onMessagePublished(
       logger.info("Push triage", stats);
     }
     await setGmailState({ historyId: latest });
+    await syncInboxState(gmail);
   },
 );
 
@@ -86,7 +87,8 @@ export const renewWatch = onSchedule(
 //   POST /backfill?n=200&days=30      triage recent inbox threads (read-only)
 //         &force=1                    re-triage even if already done
 //   GET  /briefing                    GUPPI-format text briefing
-//   GET  /triage?limit=200            raw triage records (JSON) for grading
+//   GET  /triage?limit=200&status=    raw triage records (JSON); status=open|done|dismissed|all (default all)
+//   POST /sync                        reconcile open items with the current inbox
 //   GET  /priorities                  current priorities markdown
 //   PUT  /priorities                  replace it (text/plain body)
 // ---------------------------------------------------------------------------
@@ -134,12 +136,28 @@ export const api = onRequest(
           return;
         }
         case "GET /briefing": {
-          res.type("text/plain").send(buildBriefing(await recentTriage(300)));
+          await syncInboxState(gmailClient());
+          res.type("text/plain").send(buildBriefing(await recentTriage(300, "open")));
           return;
         }
         case "GET /triage": {
           const limit = Math.min(Number(req.query.limit ?? 200) || 200, 1000);
-          res.json(await recentTriage(limit));
+          const status = req.query.status === "all" ? undefined : ((req.query.status as string) || undefined);
+          if (status && !["open", "done", "dismissed"].includes(status)) {
+            res.status(400).send("[Rejected. status must be open, done, dismissed or all.]");
+            return;
+          }
+          await syncInboxState(gmailClient());
+          res.json(await recentTriage(limit, status as "open" | "done" | "dismissed" | undefined));
+          return;
+        }
+        case "POST /sync": {
+          const result = await syncInboxState(gmailClient());
+          if (!result) {
+            res.status(500).send("[Inbox sync failed. See logs.]");
+            return;
+          }
+          res.json({ status: "[Inbox synced.]", ...result });
           return;
         }
         case "GET /priorities": {

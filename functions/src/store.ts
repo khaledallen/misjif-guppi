@@ -26,6 +26,8 @@ export interface TriageRecord extends TriageResult {
   triagedAt: string;
   model: string;
   status: "open" | "done" | "dismissed";
+  closedReason?: "left_inbox" | null;
+  closedAt?: string | null;
 }
 
 export async function getPriorities(): Promise<string> {
@@ -54,7 +56,8 @@ export async function setGmailState(update: { historyId?: string; watchExpiratio
 /** True if this thread's latest message has already been triaged. */
 export async function alreadyTriaged(threadId: string, lastMessageId: string): Promise<boolean> {
   const snap = await db.doc(`triage/${threadId}`).get();
-  return snap.exists && snap.get("lastMessageId") === lastMessageId;
+  // Failed triage stand-ins don't count: retry them.
+  return snap.exists && snap.get("lastMessageId") === lastMessageId && snap.get("rule_applied") !== "triage_failed";
 }
 
 export async function saveTriage(thread: SimpleThread, result: TriageResult, model: string): Promise<void> {
@@ -68,11 +71,50 @@ export async function saveTriage(thread: SimpleThread, result: TriageResult, mod
     triagedAt: new Date().toISOString(),
     model,
     status: "open",
+    closedReason: null,
+    closedAt: null,
   };
   await db.doc(`triage/${thread.threadId}`).set(record);
 }
 
-export async function recentTriage(limit = 300): Promise<TriageRecord[]> {
-  const snap = await db.collection("triage").orderBy("triagedAt", "desc").limit(limit).get();
-  return snap.docs.map((d) => d.data() as TriageRecord);
+export async function recentTriage(limit = 300, status?: TriageRecord["status"]): Promise<TriageRecord[]> {
+  // Filter in memory to avoid needing a composite index (single user, small volume).
+  const snap = await db.collection("triage").orderBy("triagedAt", "desc").limit(status ? limit * 3 : limit).get();
+  const all = snap.docs.map((d) => d.data() as TriageRecord);
+  return (status ? all.filter((r) => (r.status ?? "open") === status) : all).slice(0, limit);
+}
+
+/**
+ * Align triage status with the real inbox: open items whose thread left the
+ * inbox (archived, deleted, filed) become done; items closed that way reopen
+ * if the thread comes back. Only the most recent `window` records are checked.
+ */
+export async function reconcileWithInbox(
+  inbox: Set<string>,
+  opts: { allowClose: boolean; window?: number },
+): Promise<{ closed: number; reopened: number }> {
+  const snap = await db.collection("triage").orderBy("triagedAt", "desc").limit(opts.window ?? 500).get();
+  const now = new Date().toISOString();
+  let batch = db.batch();
+  let pending = 0;
+  let closed = 0;
+  let reopened = 0;
+  for (const doc of snap.docs) {
+    const r = doc.data() as TriageRecord;
+    const inInbox = inbox.has(r.threadId);
+    if (r.status === "open" && !inInbox && opts.allowClose) {
+      batch.update(doc.ref, { status: "done", closedReason: "left_inbox", closedAt: now });
+      closed++;
+    } else if (r.status === "done" && r.closedReason === "left_inbox" && inInbox) {
+      batch.update(doc.ref, { status: "open", closedReason: null, closedAt: null });
+      reopened++;
+    } else continue;
+    if (++pending === 400) {
+      await batch.commit();
+      batch = db.batch();
+      pending = 0;
+    }
+  }
+  if (pending) await batch.commit();
+  return { closed, reopened };
 }
