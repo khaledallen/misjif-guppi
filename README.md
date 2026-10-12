@@ -21,6 +21,7 @@ Gmail ──watch──▶ Pub/Sub (gmail-push) ──▶ gmailPush fn ──▶
 | Briefing formatter | `functions/src/briefing.ts` |
 | Functions: `gmailPush`, `renewWatch`, `api` | `functions/src/index.ts` |
 | Default priorities (seeded on first run) | `functions/prompts/priorities.default.md` |
+| CLI client (`guppi`) | `cli/guppi.mjs` |
 | Prompt design notes | `docs/prompt-design.md` |
 
 ## Roadmap
@@ -116,22 +117,47 @@ didn't make the function publicly invokable. Fix it once — the bearer token st
 gcloud run services add-iam-policy-binding api --region=us-central1 --project=$PROJECT \
   --member=allUsers --role=roles/run.invoker
 ```
-Then:
+Then install the CLI and start GUPPI:
 ```bash
-API=https://us-central1-$PROJECT.cloudfunctions.net/api   # check the URL printed by deploy
-TOKEN=<your GUPPI_API_TOKEN>
-
-curl $API/health
-curl -X POST -H "Authorization: Bearer $TOKEN" $API/watch
-curl -X POST -H "Authorization: Bearer $TOKEN" "$API/backfill?n=200&days=30"
-curl -H "Authorization: Bearer $TOKEN" $API/briefing
+npm install -g ./cli      # from the repo root; puts `guppi` on your PATH
+guppi init --project $PROJECT
+guppi watch
+guppi backfill --n 50 --days 7
+guppi briefing
 ```
 
+## CLI
+`guppi` finds the API URL and token itself; no `TOKEN`/`API` variables needed.
+
+- **Config:** `~/.config/guppi/config.json` (project, region, API URL), written by `guppi init`.
+- **Token:** fetched from Secret Manager with your `gcloud` login, then cached in the macOS
+  Keychain (service `guppi-api-token`), or `~/.config/guppi/token-<project>` (mode 600) on other
+  systems. Never printed or written to shell history. If the cached token is rejected, the CLI
+  refetches it once automatically, so rotating `GUPPI_API_TOKEN` (and redeploying) needs no CLI step.
+
+```bash
+guppi briefing                                # the briefing
+guppi triage                                  # all calls, sorted by priority
+guppi triage --judgment                       # only calls no rule covered: what to write rules for
+guppi triage --wide | --json | --limit 200
+guppi backfill --n 50 --days 7 [--force]      # --force re-triages after a priorities change
+guppi priorities edit                         # opens $EDITOR, shows a diff, uploads on save
+guppi priorities get > priorities.md
+guppi priorities put priorities.md
+guppi watch | guppi health
+guppi token refresh | guppi token clear
+```
+
+Overrides for scripting: `GUPPI_API`, `GUPPI_TOKEN`, `GUPPI_PROJECT`. Tests: `cd cli && npm test`.
+
+Raw curl still works if you need it:
+`curl -H "Authorization: Bearer $(gcloud secrets versions access latest --secret=GUPPI_API_TOKEN)" <api-url>/briefing`
+
 ## Phase 1 exit criteria: grade the triage
-1. Fill the `<placeholders>` in priorities (people, domains, projects) and upload:
-   `curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/plain" --data-binary @priorities.md $API/priorities`
-2. Backfill 200 threads, pull `GET /triage?limit=200`, and mark where GUPPI is wrong.
-3. Each wrong call shows `rule_applied` — fix the rule, re-run with `&force=1`.
+1. Fill the `<placeholders>` in priorities (people by email/domain, projects): `guppi priorities edit`
+2. `guppi backfill --n 200 --days 30`, then `guppi triage --limit 200` and mark where GUPPI is wrong.
+3. Each wrong call shows its rule — fix the rule, then `guppi backfill --n 200 --days 30 --force`.
+   `guppi triage --judgment` lists the calls no rule covered.
 4. When ≥90% of confident calls match your judgment, move to phase 2.
 
 ## API
