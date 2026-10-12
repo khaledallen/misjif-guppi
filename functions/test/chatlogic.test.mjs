@@ -69,3 +69,74 @@ test("appendCorrection adds to the existing section, before the next heading", (
   const noSection = L.appendCorrection("# P\n- r\n", "note", "2026-10-11");
   assert.match(noSection, /## Corrections log\n- 2026-10-11: note\n$/);
 });
+
+test("stripThinking removes thinking blocks only from assistant messages", () => {
+  const a = {
+    role: "assistant",
+    content: [
+      { type: "thinking", thinking: "", signature: "s1" },
+      { type: "text", text: "ok" },
+      { type: "redacted_thinking", data: "x" },
+      { type: "tool_use", id: "t1", name: "x", input: {} },
+    ],
+  };
+  assert.deepEqual(L.stripThinking(a).content.map((b) => b.type), ["text", "tool_use"]);
+  assert.equal(a.content.length, 4, "input not mutated");
+  const onlyThinking = { role: "assistant", content: [{ type: "thinking", thinking: "", signature: "s" }] };
+  assert.deepEqual(L.stripThinking(onlyThinking).content, [{ type: "text", text: "[No reply.]" }]);
+  const user = { role: "user", content: "hi" };
+  assert.equal(L.stripThinking(user), user);
+});
+
+// One stored turn: user, system context, assistant tool call (with thinking), tool result, assistant reply.
+function turn(k) {
+  return [
+    { role: "user", content: `q${k}` },
+    { role: "system", content: `ctx${k}` },
+    { role: "assistant", content: [{ type: "thinking", thinking: "", signature: `s${k}a` }, { type: "tool_use", id: `t${k}`, name: "x", input: {} }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: `t${k}`, content: "r" }] },
+    { role: "assistant", content: [{ type: "thinking", thinking: "", signature: `s${k}b` }, { type: "text", text: `a${k}` }] },
+  ];
+}
+const hasThinking = (m) => Array.isArray(m.content) && m.content.some((b) => b.type === "thinking");
+
+test("replayed history is append-only between cuts; a cut strips the kept turns' thinking", () => {
+  let stored = [];
+  let win = { start: 0, thinkingFrom: 0 };
+  let prev = null;
+  let cuts = 0;
+  for (let k = 0; k < 30; k++) {
+    const next = L.planHistory(stored, win, 40);
+    const replay = L.replayHistory(stored, next);
+    if (next.start === win.start) {
+      // Same window: what was sent last turn is an exact prefix of what is sent now.
+      if (prev) assert.deepEqual(replay.slice(0, prev.length), prev, `turn ${k} edited history`);
+    } else {
+      cuts++;
+      assert.ok(next.start > win.start);
+      assert.equal(next.thinkingFrom, stored.length);
+      assert.ok(!replay.some(hasThinking), "kept turns lose their thinking at a cut");
+      assert.ok(L.isUserTurnStart(replay[0]), "window starts at a user turn");
+    }
+    assert.ok(replay.length <= 40);
+    win = next;
+    const sent = [...replay, ...turn(k)];
+    stored = [...stored, ...turn(k)];
+    prev = sent;
+  }
+  assert.ok(cuts >= 2 && cuts <= 8, `cuts should be rare, got ${cuts}`);
+  // Thinking produced after the last cut is replayed intact.
+  const afterCut = L.replayHistory(stored, win).slice(win.thinkingFrom - win.start);
+  assert.ok(afterCut.length > 0 && afterCut.some(hasThinking));
+});
+
+test("planHistory leaves short histories alone", () => {
+  const stored = [...turn(0), ...turn(1)];
+  const win = { start: 0, thinkingFrom: 0 };
+  assert.equal(L.planHistory(stored, win, 40), win);
+  assert.deepEqual(L.replayHistory(stored, win), stored);
+  // A legacy session replays without thinking from before thinkingFrom.
+  const legacy = L.replayHistory(stored, { start: 0, thinkingFrom: stored.length });
+  assert.ok(!legacy.some(hasThinking));
+  assert.equal(legacy.length, stored.length);
+});

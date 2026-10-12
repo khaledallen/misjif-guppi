@@ -4,7 +4,7 @@
 /** A session ends after this much inactivity; the next message starts a new one. */
 export const SESSION_IDLE_MS = 4 * 60 * 60 * 1000;
 
-/** Max stored messages replayed to the model per request (safety cap). */
+/** Max earlier messages replayed at the start of a turn (safety cap; see planHistory). */
 export const MAX_HISTORY_MESSAGES = 40;
 
 /**
@@ -27,7 +27,7 @@ export function isStandingInstruction(text: string): boolean {
   return /\b(always|from now on|going forward|in (the )?future|every time|whenever)\b/i.test(text);
 }
 
-export type StoredMessage = { role: "user" | "assistant"; content: unknown };
+export type StoredMessage = { role: "user" | "assistant" | "system"; content: unknown };
 
 /** A user message that is the start of a turn (plain text, not a tool_result). */
 export function isUserTurnStart(m: StoredMessage): boolean {
@@ -48,6 +48,45 @@ export function trimHistory<T extends StoredMessage>(messages: T[], max = MAX_HI
   // Last resort: start at the final user turn.
   for (let i = messages.length - 1; i >= 0; i--) if (isUserTurnStart(messages[i])) return messages.slice(i);
   return [];
+}
+
+// Thinking blocks are bound to the exact conversation that produced them: the
+// system prompt, the tools, and every earlier message. Replaying one after any
+// of those changed is a 400 ("bound to a different conversation"). So the
+// replayed history must be append-only; these helpers keep it that way.
+
+/** Which stored messages to replay: from `start`, with thinking removed from those before `thinkingFrom`. */
+export interface HistoryWindow {
+  start: number;
+  thinkingFrom: number;
+}
+
+const THINKING_TYPES = new Set(["thinking", "redacted_thinking"]);
+
+/** Drop thinking blocks from an assistant message; text and tool_use blocks stay. */
+export function stripThinking<T extends StoredMessage>(m: T): T {
+  if (m.role !== "assistant" || !Array.isArray(m.content)) return m;
+  const content = m.content.filter((b: { type?: string }) => !THINKING_TYPES.has(b?.type ?? ""));
+  if (content.length === m.content.length) return m;
+  return { ...m, content: content.length ? content : [{ type: "text", text: "[No reply.]" }] };
+}
+
+/**
+ * Called once per turn, before the new user message. The window only moves when
+ * the stored history outgrows `max`; it then jumps forward to keep about half, so
+ * cuts are rare. A cut changes the prefix every kept thinking block was produced
+ * from, so their thinking is stripped (from then on, every turn) and blocks
+ * produced after the cut stay valid.
+ */
+export function planHistory(messages: StoredMessage[], win: HistoryWindow, max = MAX_HISTORY_MESSAGES): HistoryWindow {
+  if (messages.length - win.start <= max) return win;
+  const kept = trimHistory(messages.slice(win.start), Math.floor(max / 2));
+  return { start: messages.length - kept.length, thinkingFrom: messages.length };
+}
+
+/** The messages to send for a window: deterministic, so it is identical on every request until the next cut. */
+export function replayHistory<T extends StoredMessage>(messages: T[], win: HistoryWindow): T[] {
+  return messages.slice(win.start).map((m, k) => (win.start + k < win.thinkingFrom ? stripThinking(m) : m));
 }
 
 /** Should the next message start a new session? */
