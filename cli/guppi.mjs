@@ -105,7 +105,8 @@ function gcloudDefaultProject() {
 }
 
 function fetchTokenFromSecretManager(project) {
-  if (!project) throw new CliError("[No project configured; cannot reach Secret Manager. Run: guppi init --project ID]");
+  if (!project)
+    throw new CliError("[No project configured; cannot reach Secret Manager. Run: guppi init --project ID]");
   const res = gcloud(["secrets", "versions", "access", "latest", `--secret=${SECRET_NAME}`, `--project=${project}`]);
   if (res.status !== 0) {
     const err = res.stderr;
@@ -113,10 +114,14 @@ function fetchTokenFromSecretManager(project) {
       throw new CliError("[gcloud is not logged in. Run: gcloud auth login]");
     }
     if (/NOT_FOUND|not found/i.test(err)) {
-      throw new CliError(`[Secret ${SECRET_NAME} not found in project ${project}. Wrong project? Check: gcloud secrets list --project=${project}]`);
+      throw new CliError(
+        `[Secret ${SECRET_NAME} not found in project ${project}. Wrong project? Check: gcloud secrets list --project=${project}]`,
+      );
     }
     if (/PERMISSION_DENIED|permission/i.test(err)) {
-      throw new CliError(`[Permission denied reading ${SECRET_NAME} in ${project}. Is gcloud logged in as the project owner?]`);
+      throw new CliError(
+        `[Permission denied reading ${SECRET_NAME} in ${project}. Is gcloud logged in as the project owner?]`,
+      );
     }
     throw new CliError(`[Could not read ${SECRET_NAME} from Secret Manager.]\n${err.trim()}`);
   }
@@ -145,7 +150,16 @@ function cacheSet(project, token) {
     // -U updates if present. The token goes via argv to `security`, which is
     // not shell history; this is the standard way to add a generic password.
     const res = run("security", [
-      "add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", project || "default", "-l", "GUPPI API token", "-w", token,
+      "add-generic-password",
+      "-U",
+      "-s",
+      KEYCHAIN_SERVICE,
+      "-a",
+      project || "default",
+      "-l",
+      "GUPPI API token",
+      "-w",
+      token,
     ]);
     if (res.status !== 0) throw new CliError(`[Could not save token to Keychain.]\n${res.stderr.trim()}`);
     return "macOS Keychain";
@@ -191,7 +205,9 @@ async function rawRequest(url, { method = "GET", token, body, contentType, timeo
     if (cause === "TimeoutError" || err?.name === "TimeoutError") {
       throw new CliError(`[Timed out after ${Math.round(timeoutMs / 1000)}s: ${method} ${url}]`);
     }
-    throw new CliError(`[API unreachable: ${url}${cause ? ` (${cause})` : ""}. Check your connection, or re-run: guppi init]`);
+    throw new CliError(
+      `[API unreachable: ${url}${cause ? ` (${cause})` : ""}. Check your connection, or re-run: guppi init]`,
+    );
   }
 }
 
@@ -213,12 +229,14 @@ async function api(path, opts = {}) {
     const failure = await describeAuthFailure(res);
     if (failure.kind === "app" && source === "cache") {
       // Cached token may be stale (secret rotated). Refetch once and retry.
-      ({ token, source } = resolveToken(project, { refresh: true }));
+      ({ token } = resolveToken(project, { refresh: true }));
       res = await rawRequest(url, { ...opts, token });
       if (res.status !== 401 && res.status !== 403) return res;
       const again = await describeAuthFailure(res);
       if (again.kind === "google") throw googleAuthError(project);
-      throw new CliError("[Unauthorized. The token in Secret Manager does not match the deployed function. Redeploy after changing GUPPI_API_TOKEN.]");
+      throw new CliError(
+        "[Unauthorized. The token in Secret Manager does not match the deployed function. Redeploy after changing GUPPI_API_TOKEN.]",
+      );
     }
     if (failure.kind === "google") throw googleAuthError(project);
     throw new CliError(
@@ -314,12 +332,16 @@ async function cmdBackfill(flags) {
   q.set("n", String(flags.n ?? 50));
   q.set("days", String(flags.days ?? 7));
   if (flags.force) q.set("force", "1");
-  console.log(`[Backfill: up to ${q.get("n")} threads from the last ${q.get("days")} days${flags.force ? ", re-triaging all" : ""}. This can take a few minutes.]`);
+  console.log(
+    `[Backfill: up to ${q.get("n")} threads from the last ${q.get("days")} days${flags.force ? ", re-triaging all" : ""}. This can take a few minutes.]`,
+  );
   const res = await api(`/backfill?${q}`, { method: "POST", timeoutMs: 600_000 });
   const d = await res.json();
   console.log(`${d.status} Seen ${d.seen}, triaged ${d.triaged}, skipped ${d.skipped}, failed ${d.failed}.`);
   if (d.failed > 0) {
-    console.log(`[${d.failed} failed. Re-running retries only the failures. Errors: gcloud logging read '"Triage failed"' --freshness=1h --limit=10]`);
+    console.log(
+      `[${d.failed} failed. Re-running retries only the failures. Errors: gcloud logging read '"Triage failed"' --freshness=1h --limit=10]`,
+    );
   }
 }
 
@@ -346,13 +368,23 @@ async function cmdTriage(flags) {
     return;
   }
   if (!records.length) {
-    console.log(status === "open" ? "[Nothing open. Inbox clear, or run: guppi backfill]" : "[No triage records yet. Run: guppi backfill]");
+    console.log(
+      status === "open"
+        ? "[Nothing open. Inbox clear, or run: guppi backfill]"
+        : "[No triage records yet. Run: guppi backfill]",
+    );
     return;
   }
   const filtered = flags.judgment ? records.filter((r) => /^judgment/i.test(r.rule_applied || "")) : records;
-  filtered.sort((a, b) => (PRIO_ORDER[a.priority] ?? 9) - (PRIO_ORDER[b.priority] ?? 9) || (b.receivedAt || "").localeCompare(a.receivedAt || ""));
+  filtered.sort(
+    (a, b) =>
+      (PRIO_ORDER[a.priority] ?? 9) - (PRIO_ORDER[b.priority] ?? 9) ||
+      (b.receivedAt || "").localeCompare(a.receivedAt || ""),
+  );
   const wide = flags.wide;
-  console.log(`${pad("PRIO", 7)}${pad("CAT", 7)}${pad("CONF", 5)}${pad("FROM", 22)}${pad("SUMMARY", wide ? 60 : 44)}RULE`);
+  console.log(
+    `${pad("PRIO", 7)}${pad("CAT", 7)}${pad("CONF", 5)}${pad("FROM", 22)}${pad("SUMMARY", wide ? 60 : 44)}RULE`,
+  );
   for (const r of filtered) {
     const flag = r.injection_suspected ? " ⚠" : "";
     console.log(
@@ -368,7 +400,9 @@ async function cmdTriage(flags) {
   const failed = records.filter((r) => r.rule_applied === "triage_failed").length;
   if (failed) console.log(`[${failed} could not be triaged (rule: triage_failed). Retry with: guppi backfill]`);
   const judgment = records.filter((r) => /^judgment/i.test(r.rule_applied || "")).length;
-  console.log(`\n[${filtered.length} shown. ${judgment} of ${records.length} decided by judgment, not a rule.${flags.judgment ? "" : " Show only those: guppi triage --judgment"}]`);
+  console.log(
+    `\n[${filtered.length} shown. ${judgment} of ${records.length} decided by judgment, not a rule.${flags.judgment ? "" : " Show only those: guppi triage --judgment"}]`,
+  );
 }
 
 async function cmdPriorities(positional) {
@@ -422,7 +456,13 @@ async function cmdPriorities(positional) {
     console.log("Each entry is the doc as it was BEFORE that change. Restore with: guppi priorities restore <id>\n");
     console.log(`${pad("ID", 22)}${pad("SAVED", 22)}${pad("BY", 9)}${pad("SIZE", 7)}REASON`);
     for (const v of versions) {
-      console.log(pad(v.id, 22) + pad(v.savedAt.replace("T", " ").slice(0, 19), 22) + pad(v.source, 9) + pad(v.chars, 7) + (v.reason || ""));
+      console.log(
+        pad(v.id, 22) +
+          pad(v.savedAt.replace("T", " ").slice(0, 19), 22) +
+          pad(v.source, 9) +
+          pad(v.chars, 7) +
+          (v.reason || ""),
+      );
     }
     return;
   }
@@ -490,7 +530,8 @@ function hoursAgo(iso) {
 async function cmdChat(flags, positional = []) {
   let mode = flags.new ? "new" : flags.continue ? "continue" : "auto";
 
-  const oneShot = typeof flags.m === "string" ? flags.m : typeof flags.message === "string" ? flags.message : positional.join(" ");
+  const oneShot =
+    typeof flags.m === "string" ? flags.m : typeof flags.message === "string" ? flags.message : positional.join(" ");
   if (oneShot.trim()) {
     printChatResult(await sendChat(oneShot.trim(), mode));
     return;
@@ -500,7 +541,9 @@ async function cmdChat(flags, positional = []) {
   if (mode === "new") console.log("[New session.]");
   else if (!info.conversation_id) console.log("[New session.]");
   else if (info.idle_expired && mode !== "continue") {
-    console.log(`[Last session ended ${hoursAgo(info.lastActiveAt)} ago. Your first message starts a new one; /continue to resume it.]`);
+    console.log(
+      `[Last session ended ${hoursAgo(info.lastActiveAt)} ago. Your first message starts a new one; /continue to resume it.]`,
+    );
   } else console.log(`[Resuming session: ${info.turns} turns, last active ${hoursAgo(info.lastActiveAt)} ago.]`);
   console.log(color(2, "[/new  /continue  /briefing  /quit]"));
 
@@ -602,17 +645,30 @@ async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const { flags, positional } = parseFlags(rest);
   switch (cmd) {
-    case "init": return cmdInit(flags);
-    case "health": return cmdHealth();
-    case "briefing": return cmdBriefing();
-    case "watch": return cmdWatch();
-    case "sync": return cmdSync();
-    case "backfill": return cmdBackfill(flags);
-    case "triage": return cmdTriage(flags);
-    case "priorities": return cmdPriorities(positional);
-    case "token": return cmdToken(positional);
-    case "chat": return cmdChat(flags, positional);
-    case undefined: case "help": case "-h": case "--help":
+    case "init":
+      return cmdInit(flags);
+    case "health":
+      return cmdHealth();
+    case "briefing":
+      return cmdBriefing();
+    case "watch":
+      return cmdWatch();
+    case "sync":
+      return cmdSync();
+    case "backfill":
+      return cmdBackfill(flags);
+    case "triage":
+      return cmdTriage(flags);
+    case "priorities":
+      return cmdPriorities(positional);
+    case "token":
+      return cmdToken(positional);
+    case "chat":
+      return cmdChat(flags, positional);
+    case undefined:
+    case "help":
+    case "-h":
+    case "--help":
       console.log(HELP);
       return;
     default:

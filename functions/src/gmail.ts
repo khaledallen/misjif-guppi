@@ -112,7 +112,10 @@ export async function listInboxThreadIds(gmail: gmail_v1.Gmail, max: number, que
  * inbox is larger than the cap, so callers can avoid closing items they
  * simply didn't see.
  */
-export async function inboxSnapshot(gmail: gmail_v1.Gmail, cap = 2000): Promise<{ ids: Set<string>; complete: boolean }> {
+export async function inboxSnapshot(
+  gmail: gmail_v1.Gmail,
+  cap = 2000,
+): Promise<{ ids: Set<string>; complete: boolean }> {
   const ids = new Set<string>();
   let pageToken: string | undefined;
   do {
@@ -219,7 +222,10 @@ function stripQuoted(text: string): string {
     if (line.startsWith(">")) continue;
     out.push(line);
   }
-  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return out
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function truncate(s: string, n: number): string {

@@ -22,18 +22,39 @@ let lastChat = null;
 
 const TRIAGE = [
   {
-    threadId: "t1", from: '"Pat Recruiter" <pat@stripe.com>', subject: "Role", summary: "Recruiter outreach for staff role",
-    category: "fyi", priority: "low", confidence: 0.82, rule_applied: "Recruiters from companies I'm NOT interviewing with",
-    receivedAt: "2026-10-10T10:00:00Z", injection_suspected: false,
+    threadId: "t1",
+    from: '"Pat Recruiter" <pat@stripe.com>',
+    subject: "Role",
+    summary: "Recruiter outreach for staff role",
+    category: "fyi",
+    priority: "low",
+    confidence: 0.82,
+    rule_applied: "Recruiters from companies I'm NOT interviewing with",
+    receivedAt: "2026-10-10T10:00:00Z",
+    injection_suspected: false,
   },
   {
-    threadId: "t2", from: "Avionics Shop <quotes@shop.example>", subject: "Quote", summary: "Panel quote ready, needs approval",
-    category: "action", priority: "high", confidence: 0.91, rule_applied: "Avionics upgrade: shop quotes are HIGH",
-    receivedAt: "2026-10-11T10:00:00Z", injection_suspected: false,
+    threadId: "t2",
+    from: "Avionics Shop <quotes@shop.example>",
+    subject: "Quote",
+    summary: "Panel quote ready, needs approval",
+    category: "action",
+    priority: "high",
+    confidence: 0.91,
+    rule_applied: "Avionics upgrade: shop quotes are HIGH",
+    receivedAt: "2026-10-11T10:00:00Z",
+    injection_suspected: false,
   },
   {
-    threadId: "t3", from: "random@example.com", subject: "Hi", summary: "Unclear request from unknown sender",
-    category: "fyi", priority: "normal", confidence: 0.4, rule_applied: "judgment", receivedAt: "2026-10-09T10:00:00Z",
+    threadId: "t3",
+    from: "random@example.com",
+    subject: "Hi",
+    summary: "Unclear request from unknown sender",
+    category: "fyi",
+    priority: "normal",
+    confidence: 0.4,
+    rule_applied: "judgment",
+    receivedAt: "2026-10-09T10:00:00Z",
     injection_suspected: true,
   },
 ];
@@ -56,7 +77,9 @@ before(async () => {
       const route = `${req.method} ${url.pathname}`;
       switch (route) {
         case "GET /api/briefing":
-          return res.end("[Briefing. 1 action item. 0 would be auto-handled. 1 needs your call.]\n1. HIGH | Avionics Shop | Panel quote");
+          return res.end(
+            "[Briefing. 1 action item. 0 would be auto-handled. 1 needs your call.]\n1. HIGH | Avionics Shop | Panel quote",
+          );
         case "GET /api/triage": {
           lastTriageStatus = url.searchParams.get("status");
           res.setHeader("content-type", "application/json");
@@ -67,27 +90,78 @@ before(async () => {
           lastChat = msg;
           res.setHeader("content-type", "application/json");
           if (msg.message === "yes") {
-            return res.end(JSON.stringify({
-              conversation_id: "c1", session: "continued", reply: "[Applied. Re-ranked.]", proposals: [], tools_used: ["apply_priorities_change"],
-              applied: [{ diff: "+ - recruiters low unless interviewing", reason: "recruiter rule",
-                retriage: { checked: 5, failed: 0, moved: [{ threadId: "t1", from: "Pat <p@x.com>", subject: "Role", before: "normal/fyi", after: "low/fyi" }] } }],
-            }));
+            return res.end(
+              JSON.stringify({
+                conversation_id: "c1",
+                session: "continued",
+                reply: "[Applied. Re-ranked.]",
+                proposals: [],
+                tools_used: ["apply_priorities_change"],
+                applied: [
+                  {
+                    diff: "+ - recruiters low unless interviewing",
+                    reason: "recruiter rule",
+                    retriage: {
+                      checked: 5,
+                      failed: 0,
+                      moved: [
+                        {
+                          threadId: "t1",
+                          from: "Pat <p@x.com>",
+                          subject: "Role",
+                          before: "normal/fyi",
+                          after: "low/fyi",
+                        },
+                      ],
+                    },
+                  },
+                ],
+              }),
+            );
           }
-          return res.end(JSON.stringify({
-            conversation_id: "c1", session: msg.session === "new" ? "new" : "continued",
-            reply: "[1 rule change proposed.]", applied: [], tools_used: ["propose_priorities_change"],
-            proposals: [{ id: "p1", diff: "  ## Rules\n+ - recruiters low unless interviewing", reason: "recruiter rule", can_apply_now: false }],
-          }));
+          return res.end(
+            JSON.stringify({
+              conversation_id: "c1",
+              session: msg.session === "new" ? "new" : "continued",
+              reply: "[1 rule change proposed.]",
+              applied: [],
+              tools_used: ["propose_priorities_change"],
+              proposals: [
+                {
+                  id: "p1",
+                  diff: "  ## Rules\n+ - recruiters low unless interviewing",
+                  reason: "recruiter rule",
+                  can_apply_now: false,
+                },
+              ],
+            }),
+          );
         }
         case "GET /api/chat/session":
           res.setHeader("content-type", "application/json");
-          return res.end(JSON.stringify({ conversation_id: "c1", lastActiveAt: new Date(Date.now() - 5 * 3600_000).toISOString(), idle_expired: true, turns: 3 }));
+          return res.end(
+            JSON.stringify({
+              conversation_id: "c1",
+              lastActiveAt: new Date(Date.now() - 5 * 3600_000).toISOString(),
+              idle_expired: true,
+              turns: 3,
+            }),
+          );
         case "GET /api/priorities/history":
           res.setHeader("content-type", "application/json");
-          return res.end(JSON.stringify([{ id: "v1", savedAt: "2026-10-11T20:00:00.000Z", source: "chat", reason: "recruiter rule", chars: 1200 }]));
+          return res.end(
+            JSON.stringify([
+              { id: "v1", savedAt: "2026-10-11T20:00:00.000Z", source: "chat", reason: "recruiter rule", chars: 1200 },
+            ]),
+          );
         case "POST /api/priorities/restore":
           res.setHeader("content-type", "application/json");
-          return res.end(JSON.stringify({ status: "[Priorities restored.]", restored: { id: url.searchParams.get("id"), savedAt: "2026-10-11T20:00:00.000Z" } }));
+          return res.end(
+            JSON.stringify({
+              status: "[Priorities restored.]",
+              restored: { id: url.searchParams.get("id"), savedAt: "2026-10-11T20:00:00.000Z" },
+            }),
+          );
         case "POST /api/sync":
           res.setHeader("content-type", "application/json");
           return res.end(JSON.stringify({ status: "[Inbox synced.]", closed: 4, reopened: 1, complete: true }));
@@ -98,10 +172,15 @@ before(async () => {
           return res.end("[Priorities updated.]");
         case "POST /api/backfill":
           res.setHeader("content-type", "application/json");
-          return res.end(JSON.stringify({
-            status: "[Backfill complete.]", seen: Number(url.searchParams.get("n")), triaged: 3, skipped: 1,
-            failed: url.searchParams.get("force") ? 1 : 0,
-          }));
+          return res.end(
+            JSON.stringify({
+              status: "[Backfill complete.]",
+              seen: Number(url.searchParams.get("n")),
+              triaged: 3,
+              skipped: 1,
+              failed: url.searchParams.get("force") ? 1 : 0,
+            }),
+          );
         case "POST /api/watch":
           res.setHeader("content-type", "application/json");
           return res.end(JSON.stringify({ status: "[Watch active.]", expiration: "2026-10-19T00:00:00.000Z" }));
@@ -249,7 +328,13 @@ test("triage table sorts by priority and flags judgment + injection", async () =
   assert.match(r.stdout, /1 of 3 decided by judgment/);
 
   const j = await cli(["triage", "--judgment"], sb.env);
-  assert.equal(j.stdout.trim().split("\n").filter((l) => /^(top|high|normal|low)/.test(l)).length, 1);
+  assert.equal(
+    j.stdout
+      .trim()
+      .split("\n")
+      .filter((l) => /^(top|high|normal|low)/.test(l)).length,
+    1,
+  );
 
   const json = await cli(["triage", "--json", "--limit", "2"], sb.env);
   assert.equal(JSON.parse(json.stdout).length, 2);

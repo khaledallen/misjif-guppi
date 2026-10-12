@@ -38,7 +38,9 @@ server.listen(0, "127.0.0.1", () => {
       const { tokens } = await oauth.getToken(code);
       res.end("[Acknowledged.] Token received. You can close this tab.");
       if (!tokens.refresh_token) {
-        console.error("\nNo refresh_token returned. Revoke GUPPI at https://myaccount.google.com/permissions and retry.");
+        console.error(
+          "\nNo refresh_token returned. Revoke GUPPI at https://myaccount.google.com/permissions and retry.",
+        );
       } else {
         console.log("\nRefresh token (store it as GMAIL_REFRESH_TOKEN, do not commit it):\n");
         console.log(tokens.refresh_token);

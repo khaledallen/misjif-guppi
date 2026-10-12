@@ -196,6 +196,13 @@ GUPPI answers from your triage queue and can change the priorities doc conversat
   **quarantined reader**, a separate model call with no tools, and only its answer comes back. Injected
   instructions in an email can't reach the chat's tools.
 
+## Checks
+CI runs these on every PR, and deploys only if they pass:
+- `cd functions && npm test`: TypeScript build (strict) + backend unit tests
+- `cd cli && npm test`: CLI unit tests
+- `npm run lint` and `npm run format:check` (from the repo root, after `npm install` there and in
+  `functions/`): ESLint with type-aware rules, and Prettier. `npm run format` fixes formatting.
+
 ## Safety notes
 - **Fail visible:** a thread that can't be triaged (API error, output cut off) is recorded as a
   zero-confidence `triage_failed` item under "Needs your call" and retried on the next backfill.

@@ -90,7 +90,11 @@ export function replayHistory<T extends StoredMessage>(messages: T[], win: Histo
 }
 
 /** Should the next message start a new session? */
-export function shouldStartNewSession(lastActiveMs: number | null, nowMs: number, mode: "auto" | "new" | "continue"): boolean {
+export function shouldStartNewSession(
+  lastActiveMs: number | null,
+  nowMs: number,
+  mode: "auto" | "new" | "continue",
+): boolean {
   if (mode === "new") return true;
   if (lastActiveMs === null) return true;
   if (mode === "continue") return false;

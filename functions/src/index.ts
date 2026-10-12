@@ -155,7 +155,7 @@ export const api = onRequest(
         }
         case "GET /triage": {
           const limit = Math.min(Number(req.query.limit ?? 200) || 200, 1000);
-          const status = req.query.status === "all" ? undefined : ((req.query.status as string) || undefined);
+          const status = req.query.status === "all" ? undefined : (req.query.status as string) || undefined;
           if (status && !["open", "done", "dismissed"].includes(status)) {
             res.status(400).send("[Rejected. status must be open, done, dismissed or all.]");
             return;
@@ -165,13 +165,13 @@ export const api = onRequest(
           return;
         }
         case "POST /chat": {
-          const body = typeof req.body === "object" && req.body ? req.body : {};
+          const body = (typeof req.body === "object" && req.body ? req.body : {}) as Record<string, unknown>;
           const message = typeof body.message === "string" ? body.message.trim() : "";
           if (!message) {
             res.status(400).send('[Rejected. Send JSON: {"message": "...", "session": "auto|new|continue"}]');
             return;
           }
-          const mode: SessionMode = ["new", "continue"].includes(body.session) ? body.session : "auto";
+          const mode: SessionMode = body.session === "new" || body.session === "continue" ? body.session : "auto";
           const channel = typeof body.channel === "string" ? body.channel.slice(0, 20) : "cli";
           res.json(await chat(gmailClient(), TRIAGE_MODEL.value(), message.slice(0, 8000), { mode, channel }));
           return;
@@ -186,7 +186,7 @@ export const api = onRequest(
           return;
         }
         case "POST /priorities/restore": {
-          const id = String(req.query.id ?? "");
+          const id = typeof req.query.id === "string" ? req.query.id : "";
           if (!id) {
             res.status(400).send("[Rejected. Pass ?id=<version id> from /priorities/history.]");
             return;
@@ -209,7 +209,8 @@ export const api = onRequest(
           return;
         }
         case "PUT /priorities": {
-          const body = typeof req.body === "string" ? req.body : req.body?.markdown;
+          const body: unknown =
+            typeof req.body === "string" ? req.body : (req.body as { markdown?: unknown } | undefined)?.markdown;
           if (typeof body !== "string" || body.trim().length < 20) {
             res.status(400).send("[Rejected. Send the full markdown as text/plain.]");
             return;

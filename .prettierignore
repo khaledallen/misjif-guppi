@@ -1,0 +1,3 @@
+functions/lib/
+# Prose and prompt text (priorities.default.md is read by the model): keep as written.
+*.md

@@ -66,7 +66,9 @@ export async function triageThreads(
  * Close triage items whose threads are no longer in the inbox (and reopen ones
  * that came back). Never throws: a failed sync just leaves the view stale.
  */
-export async function syncInboxState(gmail: gmail_v1.Gmail): Promise<{ closed: number; reopened: number; complete: boolean } | null> {
+export async function syncInboxState(
+  gmail: gmail_v1.Gmail,
+): Promise<{ closed: number; reopened: number; complete: boolean } | null> {
   try {
     const { ids, complete } = await inboxSnapshot(gmail);
     // If the inbox is bigger than we listed, don't close anything we merely didn't see.

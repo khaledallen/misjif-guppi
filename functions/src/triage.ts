@@ -168,7 +168,9 @@ export function failedTriage(err: unknown): TriageResult {
     deadline: null,
     waiting_on_me: false,
     effort: "short",
-    summary: `[Triage failed: ${String(err).replace(/^Error:\s*/, "").slice(0, 120)}]`,
+    summary: `[Triage failed: ${String(err)
+      .replace(/^Error:\s*/, "")
+      .slice(0, 120)}]`,
     proposed_action: "none",
     rule_applied: TRIAGE_FAILED_RULE,
     confidence: 0,
