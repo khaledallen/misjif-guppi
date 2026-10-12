@@ -12,7 +12,9 @@ export const db = getFirestore();
 //   config/priorities   { markdown, updatedAt }
 //   state/gmail         { historyId, watchExpiration, updatedAt }
 //   triage/{threadId}   TriageRecord
-//   corrections/{auto}  reserved for phase 2 (conversation loop)
+//   priorities_history/{auto}  { markdown, savedAt, source, reason } — previous versions
+//   conversations/{id}  chat sessions (see chat.ts); messages in a subcollection
+//   state/chat          { currentId }
 
 const priorities = db.doc("config/priorities");
 const gmailState = db.doc("state/gmail");
@@ -40,8 +42,56 @@ export async function getPriorities(): Promise<string> {
   return seeded;
 }
 
-export async function setPriorities(markdown: string): Promise<void> {
+export interface PrioritiesVersion {
+  id: string;
+  savedAt: string;
+  source: string; // "api" | "chat" | "restore"
+  reason: string;
+  chars: number;
+  markdown?: string;
+}
+
+/**
+ * Replace the priorities doc, first saving the current version to
+ * priorities_history so any change (by Khaled or by GUPPI) can be rolled back.
+ */
+export async function setPriorities(markdown: string, meta: { source?: string; reason?: string } = {}): Promise<void> {
+  const snap = await priorities.get();
+  const previous = snap.exists ? (snap.get("markdown") as string | undefined) : undefined;
+  if (previous !== undefined) {
+    await db.collection("priorities_history").add({
+      markdown: previous,
+      savedAt: new Date().toISOString(),
+      source: meta.source ?? "api",
+      reason: meta.reason ?? "",
+      chars: previous.length,
+    });
+  }
   await priorities.set({ markdown, updatedAt: FieldValue.serverTimestamp() });
+}
+
+/** Most recent first. Each entry is the doc as it was BEFORE that change. */
+export async function prioritiesHistory(limit = 20, withMarkdown = false): Promise<PrioritiesVersion[]> {
+  const snap = await db.collection("priorities_history").orderBy("savedAt", "desc").limit(limit).get();
+  return snap.docs.map((d) => {
+    const v = d.data();
+    return {
+      id: d.id,
+      savedAt: v.savedAt,
+      source: v.source,
+      reason: v.reason,
+      chars: v.chars,
+      ...(withMarkdown ? { markdown: v.markdown } : {}),
+    };
+  });
+}
+
+export async function restorePriorities(versionId: string): Promise<PrioritiesVersion> {
+  const doc = await db.doc(`priorities_history/${versionId}`).get();
+  if (!doc.exists) throw new Error(`No priorities version ${versionId}`);
+  const v = doc.data() as { markdown: string; savedAt: string };
+  await setPriorities(v.markdown, { source: "restore", reason: `restored version from ${v.savedAt}` });
+  return { id: doc.id, savedAt: v.savedAt, source: "restore", reason: "", chars: v.markdown.length };
 }
 
 export async function getHistoryId(): Promise<string | null> {

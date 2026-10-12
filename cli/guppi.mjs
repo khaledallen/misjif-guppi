@@ -20,6 +20,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, rmSync, mkdtempSync } from "node:fs";
 import { homedir, tmpdir, platform } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline/promises";
 
 const SECRET_NAME = "GUPPI_API_TOKEN";
 const KEYCHAIN_SERVICE = "guppi-api-token";
@@ -40,8 +41,8 @@ function parseFlags(args) {
   const positional = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a.startsWith("--")) {
-      const [k, inline] = a.slice(2).split("=", 2);
+    if (a.startsWith("--") || /^-[a-zA-Z]$/.test(a)) {
+      const [k, inline] = a.replace(/^--?/, "").split("=", 2);
       if (inline !== undefined) flags[k] = inline;
       else if (args[i + 1] !== undefined && !args[i + 1].startsWith("--")) flags[k] = args[++i];
       else flags[k] = true;
@@ -411,7 +412,139 @@ async function cmdPriorities(positional) {
     }
     return;
   }
-  throw new CliError("[Usage: guppi priorities get | put <file|-> | edit]", 2);
+  if (sub === "history") {
+    const res = await api("/priorities/history?limit=20");
+    const versions = await res.json();
+    if (!versions.length) {
+      console.log("[No previous versions yet.]");
+      return;
+    }
+    console.log("Each entry is the doc as it was BEFORE that change. Restore with: guppi priorities restore <id>\n");
+    console.log(`${pad("ID", 22)}${pad("SAVED", 22)}${pad("BY", 9)}${pad("SIZE", 7)}REASON`);
+    for (const v of versions) {
+      console.log(pad(v.id, 22) + pad(v.savedAt.replace("T", " ").slice(0, 19), 22) + pad(v.source, 9) + pad(v.chars, 7) + (v.reason || ""));
+    }
+    return;
+  }
+  if (sub === "restore") {
+    const id = positional[1];
+    if (!id) throw new CliError("[Usage: guppi priorities restore <id>   (ids from: guppi priorities history)]", 2);
+    const res = await api(`/priorities/restore?id=${encodeURIComponent(id)}`, { method: "POST" });
+    const d = await res.json();
+    console.log(`${d.status} Version from ${d.restored.savedAt}. The replaced version is in history too.`);
+    console.log("[Re-triage existing threads with the restored rules: guppi backfill --force]");
+    return;
+  }
+  throw new CliError("[Usage: guppi priorities get | put <file|-> | edit | history | restore <id>]", 2);
+}
+
+// ---------------------------------------------------------------------------
+// Chat
+// ---------------------------------------------------------------------------
+const tty = process.stdout.isTTY;
+const color = (code, s) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
+
+function printDiff(diff) {
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+ ")) console.log(color(32, line));
+    else if (line.startsWith("- ")) console.log(color(31, line));
+    else console.log(color(2, line));
+  }
+}
+
+function printChatResult(r) {
+  if (r.reply) console.log(`\n${r.reply}`);
+  for (const p of r.proposals || []) {
+    // Diffs are server-generated and printed verbatim, never paraphrased by the model.
+    console.log(color(1, `\n[Proposed priorities change ${p.id}] ${p.reason}`));
+    printDiff(p.diff);
+    const applied = (r.applied || []).length > 0;
+    if (!p.can_apply_now && !applied) console.log(color(1, "[Reply 'yes' to apply.]"));
+  }
+  for (const a of r.applied || []) {
+    console.log(color(1, `\n[Applied] ${a.reason}`));
+    if (!(r.proposals || []).length) printDiff(a.diff);
+    if (a.retriage) {
+      const t = a.retriage;
+      console.log(`[Re-triaged ${t.checked}. ${t.moved.length} moved.${t.failed ? ` ${t.failed} failed.` : ""}]`);
+      for (const m of t.moved) console.log(`  ${m.before} -> ${m.after}  ${senderName(m.from)}: ${m.subject}`);
+    }
+  }
+}
+
+async function sendChat(message, session) {
+  const res = await api("/chat", {
+    method: "POST",
+    body: JSON.stringify({ message, session, channel: "cli" }),
+    contentType: "application/json",
+    timeoutMs: 300_000,
+  });
+  return res.json();
+}
+
+function hoursAgo(iso) {
+  const h = (Date.now() - Date.parse(iso)) / 3_600_000;
+  return h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : `${h.toFixed(1)} h`;
+}
+
+async function cmdChat(flags, positional = []) {
+  let mode = flags.new ? "new" : flags.continue ? "continue" : "auto";
+
+  const oneShot = typeof flags.m === "string" ? flags.m : typeof flags.message === "string" ? flags.message : positional.join(" ");
+  if (oneShot.trim()) {
+    printChatResult(await sendChat(oneShot.trim(), mode));
+    return;
+  }
+
+  const info = await (await api("/chat/session")).json();
+  if (mode === "new") console.log("[New session.]");
+  else if (!info.conversation_id) console.log("[New session.]");
+  else if (info.idle_expired && mode !== "continue") {
+    console.log(`[Last session ended ${hoursAgo(info.lastActiveAt)} ago. Your first message starts a new one; /continue to resume it.]`);
+  } else console.log(`[Resuming session: ${info.turns} turns, last active ${hoursAgo(info.lastActiveAt)} ago.]`);
+  console.log(color(2, "[/new  /continue  /briefing  /quit]"));
+
+  // Async line iterator buffers input, so lines typed or pasted while a reply is
+  // in flight are queued rather than dropped (readline's question() drops them).
+  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: tty });
+  const prompt = () => process.stdout.write(color(36, "\nyou> "));
+  rl.on("SIGINT", () => rl.close());
+  prompt();
+  try {
+    for await (const raw of rl) {
+      const line = raw.trim();
+      if (!line) {
+        prompt();
+        continue;
+      }
+      if (line === "/quit" || line === "/exit") break;
+      if (line === "/new") {
+        mode = "new";
+        console.log("[Next message starts a new session.]");
+      } else if (line === "/continue") {
+        mode = "continue";
+        console.log("[Next message continues the previous session.]");
+      } else if (line === "/briefing") {
+        console.log((await (await api("/briefing")).text()).trimEnd());
+      } else {
+        if (tty) process.stdout.write(color(2, "[Working…]"));
+        try {
+          const r = await sendChat(line, mode);
+          if (tty) process.stdout.write("\r\x1b[K");
+          if (r.session === "new" && mode !== "new") console.log(color(2, "[New session started.]"));
+          printChatResult(r);
+          mode = "auto";
+        } catch (err) {
+          if (tty) process.stdout.write("\r\x1b[K");
+          console.error(err instanceof CliError ? err.message : String(err));
+        }
+      }
+      prompt();
+    }
+  } finally {
+    rl.close();
+    if (tty) process.stdout.write("\n");
+  }
 }
 
 async function cmdToken(positional) {
@@ -448,10 +581,16 @@ Inbox
   guppi watch                             start/renew the Gmail watch
   guppi health                            liveness check (no auth)
 
+Chat
+  guppi chat [--new | --continue]         talk to GUPPI (/new /continue /briefing /quit)
+  guppi chat -m "message"                 one-shot message
+
 Priorities
   guppi priorities get                    print the current priorities markdown
   guppi priorities put <file|->           replace it from a file or stdin
   guppi priorities edit                   open in $EDITOR, upload on save
+  guppi priorities history                previous versions (saved on every change)
+  guppi priorities restore <id>           roll back to a previous version
 
 Token
   guppi token refresh                     refetch from Secret Manager (after rotating it)
@@ -472,6 +611,7 @@ async function main() {
     case "triage": return cmdTriage(flags);
     case "priorities": return cmdPriorities(positional);
     case "token": return cmdToken(positional);
+    case "chat": return cmdChat(flags, positional);
     case undefined: case "help": case "-h": case "--help":
       console.log(HELP);
       return;

@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: npm run build
+      - run: npm test   # tsc build + backend unit tests
 
   cli:
     runs-on: ubuntu-latest

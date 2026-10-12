@@ -71,12 +71,12 @@ const TRIAGE_SCHEMA = {
 };
 
 let client: Anthropic | null = null;
-function anthropic(): Anthropic {
+export function anthropic(): Anthropic {
   if (!client) client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value().trim() });
   return client;
 }
 
-function renderThread(t: SimpleThread): string {
+export function renderThread(t: SimpleThread): string {
   const msgs = t.messages
     .map(
       (m, i) => `<message index="${i + 1}" sent_by_khaled="${m.sentByMe}">

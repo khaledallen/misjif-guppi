@@ -17,7 +17,16 @@ import {
 } from "./config";
 import { gmailClient, HistoryExpiredError, listInboxThreadIds, startWatch, threadsChangedSince } from "./gmail";
 import { syncInboxState, triageThreads } from "./pipeline";
-import { getHistoryId, getPriorities, recentTriage, setGmailState, setPriorities } from "./store";
+import {
+  getHistoryId,
+  getPriorities,
+  prioritiesHistory,
+  recentTriage,
+  restorePriorities,
+  setGmailState,
+  setPriorities,
+} from "./store";
+import { chat, sessionInfo, type SessionMode } from "./chat";
 import { buildBriefing } from "./briefing";
 
 setGlobalOptions({ region: "us-central1", maxInstances: 3 });
@@ -89,6 +98,10 @@ export const renewWatch = onSchedule(
 //   GET  /briefing                    GUPPI-format text briefing
 //   GET  /triage?limit=200&status=    raw triage records (JSON); status=open|done|dismissed|all (default all)
 //   POST /sync                        reconcile open items with the current inbox
+//   POST /chat                        {message, session: auto|new|continue} -> GUPPI reply (+ proposals/applied)
+//   GET  /chat/session                current session info
+//   GET  /priorities/history          previous versions (?full=1 includes markdown)
+//   POST /priorities/restore?id=      restore a previous version
 //   GET  /priorities                  current priorities markdown
 //   PUT  /priorities                  replace it (text/plain body)
 // ---------------------------------------------------------------------------
@@ -151,6 +164,37 @@ export const api = onRequest(
           res.json(await recentTriage(limit, status as "open" | "done" | "dismissed" | undefined));
           return;
         }
+        case "POST /chat": {
+          const body = typeof req.body === "object" && req.body ? req.body : {};
+          const message = typeof body.message === "string" ? body.message.trim() : "";
+          if (!message) {
+            res.status(400).send('[Rejected. Send JSON: {"message": "...", "session": "auto|new|continue"}]');
+            return;
+          }
+          const mode: SessionMode = ["new", "continue"].includes(body.session) ? body.session : "auto";
+          const channel = typeof body.channel === "string" ? body.channel.slice(0, 20) : "cli";
+          res.json(await chat(gmailClient(), TRIAGE_MODEL.value(), message.slice(0, 8000), { mode, channel }));
+          return;
+        }
+        case "GET /chat/session": {
+          res.json(await sessionInfo());
+          return;
+        }
+        case "GET /priorities/history": {
+          const limit = Math.min(Number(req.query.limit ?? 20) || 20, 100);
+          res.json(await prioritiesHistory(limit, req.query.full === "1"));
+          return;
+        }
+        case "POST /priorities/restore": {
+          const id = String(req.query.id ?? "");
+          if (!id) {
+            res.status(400).send("[Rejected. Pass ?id=<version id> from /priorities/history.]");
+            return;
+          }
+          const v = await restorePriorities(id);
+          res.json({ status: "[Priorities restored.]", restored: v });
+          return;
+        }
         case "POST /sync": {
           const result = await syncInboxState(gmailClient());
           if (!result) {
@@ -170,7 +214,7 @@ export const api = onRequest(
             res.status(400).send("[Rejected. Send the full markdown as text/plain.]");
             return;
           }
-          await setPriorities(body);
+          await setPriorities(body, { source: "api" });
           res.send("[Priorities updated.]");
           return;
         }
