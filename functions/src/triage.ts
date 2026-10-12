@@ -70,7 +70,7 @@ const TRIAGE_TOOL: Anthropic.Messages.Tool = {
 
 let client: Anthropic | null = null;
 function anthropic(): Anthropic {
-  if (!client) client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+  if (!client) client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value().trim() });
   return client;
 }
 

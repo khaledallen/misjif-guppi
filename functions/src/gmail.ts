@@ -30,8 +30,8 @@ export interface SimpleThread {
 }
 
 export function gmailClient(): gmail_v1.Gmail {
-  const auth = new google.auth.OAuth2(GMAIL_CLIENT_ID.value(), GMAIL_CLIENT_SECRET.value());
-  auth.setCredentials({ refresh_token: GMAIL_REFRESH_TOKEN.value() });
+  const auth = new google.auth.OAuth2(GMAIL_CLIENT_ID.value().trim(), GMAIL_CLIENT_SECRET.value().trim());
+  auth.setCredentials({ refresh_token: GMAIL_REFRESH_TOKEN.value().trim() });
   return google.gmail({ version: "v1", auth });
 }
 
