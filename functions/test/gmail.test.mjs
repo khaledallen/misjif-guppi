@@ -27,10 +27,30 @@ test("isNoteToSelf only when every recipient is the sender", () => {
 });
 
 function msg(over) {
-  return { id: "m", from: ME, to: "", cc: "", date: "", subject: "s", body: "b", sentByMe: false, noteToSelf: false, ...over };
+  return {
+    id: "m",
+    from: ME,
+    to: "",
+    cc: "",
+    date: "",
+    subject: "s",
+    body: "b",
+    sentByMe: false,
+    noteToSelf: false,
+    ...over,
+  };
 }
 function thread(messages, receivedAt = "2026-10-10T12:00:00Z") {
-  return { threadId: "t1", lastMessageId: "m", subject: "s", from: ME, receivedAt, inInbox: true, repliedBefore: false, messages };
+  return {
+    threadId: "t1",
+    lastMessageId: "m",
+    subject: "s",
+    from: ME,
+    receivedAt,
+    inInbox: true,
+    repliedBefore: false,
+    messages,
+  };
 }
 const NOW = Date.parse("2026-10-12T13:00:00Z");
 
@@ -42,6 +62,9 @@ test("renderThread marks who sent the latest message and how long ago", () => {
   assert.match(note, /latest_message_from="khaled_note_to_self"/);
   assert.match(note, /note_to_self="true"/);
 
-  const sent = T.renderThread(thread([msg({ from: "bob@example.com" }), msg({ sentByMe: true })], "2026-10-12T09:00:00Z"), NOW);
+  const sent = T.renderThread(
+    thread([msg({ from: "bob@example.com" }), msg({ sentByMe: true })], "2026-10-12T09:00:00Z"),
+    NOW,
+  );
   assert.match(sent, /latest_message_from="khaled" days_since_latest_message="0"/);
 });
