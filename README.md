@@ -146,8 +146,9 @@ guppi backfill --n 50 --days 7 [--force]      # --force re-triages after a prior
 guppi priorities edit                         # opens $EDITOR, shows a diff, uploads on save
 guppi priorities get > priorities.md
 guppi priorities put priorities.md
-guppi chat                                    # talk to GUPPI (/new /continue /briefing /quit)
+guppi chat                                    # talk to GUPPI (/new /continue /briefing /timing /quit)
 guppi chat -m "what needs my attention?"      # one-shot
+guppi chat --timing                           # show where each reply's time went (or GUPPI_TIMING=1)
 guppi priorities history                      # every change is versioned
 guppi priorities restore <id>
 guppi watch | guppi health
@@ -195,6 +196,10 @@ GUPPI answers from your triage queue and can change the priorities doc conversat
 - **Reading email:** the chat model never sees raw email text. Questions needing the full text go to a
   **quarantined reader**, a separate model call with no tools, and only its answer comes back. Injected
   instructions in an email can't reach the chat's tools.
+- **Latency:** every reply carries a per-hop `timing` breakdown (setup steps such as inbox sync, each model
+  round with token and prompt-cache counts, each tool and its sub-steps, saves, cold start). `guppi chat
+  --timing` or `/timing` prints it; the server also logs it on every turn:
+  `gcloud logging read 'jsonPayload.message="Chat timing"' --freshness=1d --limit=20 --format=json`.
 
 ## Checks
 CI runs these on every PR, and deploys only if they pass:

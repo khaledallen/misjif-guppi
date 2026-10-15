@@ -36,6 +36,9 @@ class CliError extends Error {
   }
 }
 
+// Flags that never take a value, so `--timing -m "hi"` doesn't swallow the next argument.
+const BOOLEAN_FLAGS = new Set(["timing"]);
+
 function parseFlags(args) {
   const flags = {};
   const positional = [];
@@ -44,6 +47,7 @@ function parseFlags(args) {
     if (a.startsWith("--") || /^-[a-zA-Z]$/.test(a)) {
       const [k, inline] = a.replace(/^--?/, "").split("=", 2);
       if (inline !== undefined) flags[k] = inline;
+      else if (BOOLEAN_FLAGS.has(k)) flags[k] = true;
       else if (args[i + 1] !== undefined && !args[i + 1].startsWith("--")) flags[k] = args[++i];
       else flags[k] = true;
     } else positional.push(a);
@@ -513,13 +517,60 @@ function printChatResult(r) {
 }
 
 async function sendChat(message, session) {
+  const started = performance.now();
   const res = await api("/chat", {
     method: "POST",
     body: JSON.stringify({ message, session, channel: "cli" }),
     contentType: "application/json",
     timeoutMs: 300_000,
   });
-  return res.json();
+  const result = await res.json();
+  result.client_ms = Math.round(performance.now() - started);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Timing (--timing, /timing, or GUPPI_TIMING=1)
+// ---------------------------------------------------------------------------
+const secs = (ms) => `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)}s`;
+const kTok = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
+/** Per-hop breakdown of one chat turn. */
+function formatTiming(r) {
+  const t = r.timing;
+  if (!t) return "[Timing unavailable: server predates per-hop timing.]";
+  const lines = [];
+  const net = typeof r.client_ms === "number" ? r.client_ms - t.total_ms : null;
+  lines.push(
+    `[Timing] ${typeof r.client_ms === "number" ? `${secs(r.client_ms)} total · ` : ""}${secs(t.total_ms)} server` +
+      `${net !== null ? ` · ${secs(Math.max(0, net))} network/startup` : ""}${t.cold_start ? " · COLD START" : ""}`,
+  );
+  const b = t.breakdown;
+  const pct = (ms) => `${Math.round((100 * ms) / Math.max(1, t.total_ms))}%`.padStart(4);
+  const top = (prefix) =>
+    t.spans
+      .filter((s) => prefix(s.name))
+      .map((s) => `${s.name.replace(/^tool\./, "")} ${secs(s.ms)}`)
+      .join(", ");
+  const setupNames = ["resolve_session", "inbox_sync", "load_open_triage", "load_history"];
+  lines.push(`  setup  ${secs(b.setup_ms).padStart(6)} ${pct(b.setup_ms)}  ${top((n) => setupNames.includes(n))}`);
+  const rounds = t.model_rounds
+    .map(
+      (m) =>
+        `#${m.round} ${secs(m.ms)} (in ${kTok(m.input_tokens)}, cached ${kTok(m.cache_read_input_tokens)}, out ${kTok(m.output_tokens)})`,
+    )
+    .join("; ");
+  lines.push(
+    `  model  ${secs(b.model_ms).padStart(6)} ${pct(b.model_ms)}  ${t.model_rounds.length} round${t.model_rounds.length === 1 ? "" : "s"}: ${rounds}`,
+  );
+  if (b.tools_ms > 0 || t.spans.some((s) => s.name.startsWith("tool."))) {
+    lines.push(`  tools  ${secs(b.tools_ms).padStart(6)} ${pct(b.tools_ms)}  ${top((n) => n.startsWith("tool."))}`);
+    const sub = t.spans.filter((s) => !s.name.startsWith("tool.") && s.name.includes("."));
+    if (sub.length) lines.push(`                       ${sub.map((s) => `${s.name} ${secs(s.ms)}`).join(", ")}`);
+  }
+  lines.push(`  save   ${secs(b.save_ms).padStart(6)} ${pct(b.save_ms)}`);
+  if (b.other_ms >= 50) lines.push(`  other  ${secs(b.other_ms).padStart(6)} ${pct(b.other_ms)}  (unmeasured gaps)`);
+  return lines.join("\n");
 }
 
 function hoursAgo(iso) {
@@ -529,11 +580,16 @@ function hoursAgo(iso) {
 
 async function cmdChat(flags, positional = []) {
   let mode = flags.new ? "new" : flags.continue ? "continue" : "auto";
+  let showTiming = !!flags.timing || process.env.GUPPI_TIMING === "1";
+  const show = (r) => {
+    printChatResult(r);
+    if (showTiming) console.log(color(2, `\n${formatTiming(r)}`));
+  };
 
   const oneShot =
     typeof flags.m === "string" ? flags.m : typeof flags.message === "string" ? flags.message : positional.join(" ");
   if (oneShot.trim()) {
-    printChatResult(await sendChat(oneShot.trim(), mode));
+    show(await sendChat(oneShot.trim(), mode));
     return;
   }
 
@@ -545,7 +601,7 @@ async function cmdChat(flags, positional = []) {
       `[Last session ended ${hoursAgo(info.lastActiveAt)} ago. Your first message starts a new one; /continue to resume it.]`,
     );
   } else console.log(`[Resuming session: ${info.turns} turns, last active ${hoursAgo(info.lastActiveAt)} ago.]`);
-  console.log(color(2, "[/new  /continue  /briefing  /quit]"));
+  console.log(color(2, "[/new  /continue  /briefing  /timing  /quit]"));
 
   // Async line iterator buffers input, so lines typed or pasted while a reply is
   // in flight are queued rather than dropped (readline's question() drops them).
@@ -567,6 +623,9 @@ async function cmdChat(flags, positional = []) {
       } else if (line === "/continue") {
         mode = "continue";
         console.log("[Next message continues the previous session.]");
+      } else if (line === "/timing") {
+        showTiming = !showTiming;
+        console.log(`[Per-hop timing ${showTiming ? "on" : "off"}.]`);
       } else if (line === "/briefing") {
         console.log((await (await api("/briefing")).text()).trimEnd());
       } else {
@@ -575,7 +634,7 @@ async function cmdChat(flags, positional = []) {
           const r = await sendChat(line, mode);
           if (tty) process.stdout.write("\r\x1b[K");
           if (r.session === "new" && mode !== "new") console.log(color(2, "[New session started.]"));
-          printChatResult(r);
+          show(r);
           mode = "auto";
         } catch (err) {
           if (tty) process.stdout.write("\r\x1b[K");
@@ -625,8 +684,9 @@ Inbox
   guppi health                            liveness check (no auth)
 
 Chat
-  guppi chat [--new | --continue]         talk to GUPPI (/new /continue /briefing /quit)
+  guppi chat [--new | --continue]         talk to GUPPI (/new /continue /briefing /timing /quit)
   guppi chat -m "message"                 one-shot message
+  guppi chat --timing ...                 show where each reply's time went (or GUPPI_TIMING=1)
 
 Priorities
   guppi priorities get                    print the current priorities markdown

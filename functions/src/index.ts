@@ -27,6 +27,7 @@ import {
   setPriorities,
 } from "./store";
 import { chat, sessionInfo, type SessionMode } from "./chat";
+import { claimColdStart } from "./timing";
 import { buildBriefing } from "./briefing";
 
 setGlobalOptions({ region: "us-central1", maxInstances: 3 });
@@ -117,6 +118,7 @@ export const api = onRequest(
   { secrets: ALL_SECRETS, timeoutSeconds: 540, memory: "512MiB", maxInstances: 2 },
   async (req, res) => {
     const route = `${req.method} ${req.path.replace(/\/+$/, "") || "/"}`;
+    const coldStart = claimColdStart();
 
     if (route === "GET /health") {
       res.send("[Operational.]");
@@ -173,7 +175,9 @@ export const api = onRequest(
           }
           const mode: SessionMode = body.session === "new" || body.session === "continue" ? body.session : "auto";
           const channel = typeof body.channel === "string" ? body.channel.slice(0, 20) : "cli";
-          res.json(await chat(gmailClient(), TRIAGE_MODEL.value(), message.slice(0, 8000), { mode, channel }));
+          res.json(
+            await chat(gmailClient(), TRIAGE_MODEL.value(), message.slice(0, 8000), { mode, channel, coldStart }),
+          );
           return;
         }
         case "GET /chat/session": {
