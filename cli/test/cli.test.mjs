@@ -20,6 +20,42 @@ let priorities = "# Priorities\n- initial rule\n";
 let lastTriageStatus = null;
 let lastChat = null;
 
+const TIMING = {
+  total_ms: 7400,
+  cold_start: true,
+  spans: [
+    { name: "resolve_session", start_ms: 0, ms: 80 },
+    { name: "inbox_sync", start_ms: 80, ms: 1200 },
+    { name: "load_open_triage", start_ms: 1280, ms: 150 },
+    { name: "load_history", start_ms: 1430, ms: 70 },
+    { name: "ask_about_email.gmail_fetch", start_ms: 3600, ms: 300 },
+    { name: "ask_about_email.reader_model", start_ms: 3900, ms: 1500 },
+    { name: "tool.ask_about_email", start_ms: 3600, ms: 1850 },
+    { name: "save_messages", start_ms: 7200, ms: 120 },
+  ],
+  model_rounds: [
+    {
+      round: 0,
+      ms: 2100,
+      stop_reason: "tool_use",
+      input_tokens: 14200,
+      output_tokens: 90,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    },
+    {
+      round: 1,
+      ms: 1650,
+      stop_reason: "end_turn",
+      input_tokens: 14600,
+      output_tokens: 160,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    },
+  ],
+  breakdown: { setup_ms: 1500, model_ms: 3750, tools_ms: 1850, save_ms: 120, other_ms: 180 },
+};
+
 const TRIAGE = [
   {
     threadId: "t1",
@@ -124,6 +160,7 @@ before(async () => {
               conversation_id: "c1",
               session: msg.session === "new" ? "new" : "continued",
               reply: "[1 rule change proposed.]",
+              ...(msg.message === "timed" ? { timing: TIMING } : {}),
               applied: [],
               tools_used: ["propose_priorities_change"],
               proposals: [
@@ -447,6 +484,29 @@ test("chat REPL: session notice, /briefing, /continue, message, /quit", async ()
   assert.equal(lastChat.message, "hello");
   assert.equal(lastChat.session, "continue");
   assert.match(r.stdout, /\[1 rule change proposed\.\]/);
+});
+
+test("chat --timing prints the per-hop breakdown", async () => {
+  const sb = await initialized();
+  // --timing before -m must not swallow the -m flag.
+  const r = await cli(["chat", "--timing", "-m", "timed"], sb.env);
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(lastChat.message, "timed");
+  assert.match(r.stdout, /\[Timing\] [\d.]+s total · 7\.40s server · [\d.]+s network\/startup · COLD START/);
+  assert.match(r.stdout, /setup +1\.50s +20%  resolve_session 0\.08s, inbox_sync 1\.20s/);
+  assert.match(r.stdout, /model +3\.75s +51%  2 rounds: #0 2\.10s \(in 14\.2k, cached 0, out 90\)/);
+  assert.match(r.stdout, /tools +1\.85s +25%  ask_about_email 1\.85s/);
+  assert.match(r.stdout, /ask_about_email\.reader_model 1\.50s/);
+  assert.match(r.stdout, /other +0\.18s/);
+});
+
+test("chat REPL /timing toggles the breakdown; old servers degrade gracefully", async () => {
+  const sb = await initialized();
+  const r = await cli(["chat"], sb.env, "hello\n/timing\nhello\n/quit\n");
+  assert.equal(r.code, 0, r.stderr);
+  const [before, after] = r.stdout.split("[Per-hop timing on.]");
+  assert.doesNotMatch(before, /Timing/);
+  assert.match(after, /\[Timing unavailable: server predates per-hop timing\.\]/);
 });
 
 test("priorities history and restore", async () => {
